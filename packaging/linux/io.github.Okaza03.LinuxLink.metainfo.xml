@@ -68,6 +68,12 @@
   </supports>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.1" date="2026-10-17">
+      <url type="details">https://github.com/Okaza03/LinuxLink/releases/tag/v0.1.1</url>
+      <description>
+        <p>Fixes silence after switching outputs, the microphone volume changing when LinuxLink starts or quits, and the AppImage missing from the app menu and taskbar.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-17">
       <url type="details">https://github.com/Okaza03/LinuxLink/releases/tag/v0.1.0</url>
       <description>

@@ -9,6 +9,10 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-17
+
+Fixes for sound, the microphone volume and the AppImage.
+
 ### Fixed
 
 - **No more silence after switching outputs.** Your listening device now
@@ -119,5 +123,6 @@ built on PipeWire.
   Flatpak, .deb (Debian, Ubuntu, Mint, Pop!_OS), .rpm (Fedora, openSUSE), an
   Arch Linux package, and a plain tarball.
 
-[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Okaza03/LinuxLink/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Okaza03/LinuxLink/releases/tag/v0.1.0
