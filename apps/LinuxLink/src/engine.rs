@@ -60,8 +60,13 @@ pub fn effective(ch: &ChannelCfg, send: &Level) -> Level {
 }
 
 pub enum Command {
-    Apply(Box<Config>),
-    SetSource { name: String, level: Level },
+    /// New settings from the UI, with how many of the engine's own listening
+    /// switches the UI had seen (so a stale UI can't undo a newer switch).
+    Apply(Box<Config>, u64),
+    SetSource {
+        name: String,
+        level: Level,
+    },
     Shutdown,
 }
 
@@ -133,6 +138,8 @@ struct Engine {
     needs_sync: bool,
     /// Hardware outputs seen in the last refresh.
     known_sinks: HashSet<String>,
+    /// Every device (inputs and outputs) seen in the last refresh.
+    device_names: HashSet<String>,
     /// Their PipeWire node ids.
     node_ids: HashMap<String, u32>,
     /// Connected Bluetooth outputs, oldest connection first.
@@ -564,6 +571,15 @@ impl Engine {
         let inputs = pactl::sink_inputs()?;
 
         // Follow the listening device as outputs come and go.
+        // Devices coming or going (a headset connecting, LinuxLink's own
+        // changes) make some apps reset the microphone volume; guard it.
+        let devices: HashSet<String> = sinks.iter().chain(&sources).map(|d| d.name.clone()).collect();
+        if devices != self.device_names {
+            if !self.device_names.is_empty() {
+                self.guard_until = Some(Instant::now() + GUARD_FOR);
+            }
+            self.device_names = devices;
+        }
         self.guard_inputs(&sources);
         let hardware: HashSet<String> = sinks.iter().filter(|s| !is_ours(&s.name)).map(|s| s.name.clone()).collect();
         self.node_ids = sinks.iter().filter_map(|s| Some((s.name.clone(), s.node_id?))).collect();
@@ -742,7 +758,12 @@ impl Engine {
     }
 
     /// Returns whether the graph changed shape and needs a refresh.
-    fn apply(&mut self, cfg: Config) -> bool {
+    fn apply(&mut self, mut cfg: Config, listen_switches_seen: u64) -> bool {
+        // The UI sent this before it saw our latest automatic switch (a
+        // headset connecting, say): keep the switch.
+        if listen_switches_seen < self.listen_switches {
+            cfg.listen_output = self.cfg.listen_output.clone();
+        }
         if cfg == self.cfg {
             return false;
         }
@@ -869,6 +890,7 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
         sends: HashMap::new(),
         applied_default: None,
         known_sinks: HashSet::new(),
+        device_names: HashSet::new(),
         node_ids: HashMap::new(),
         bluetooth: Vec::new(),
         refreshes: 0,
@@ -906,7 +928,7 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
                 let mut shutdown = false;
                 for cmd in cmds {
                     match cmd {
-                        Command::Apply(c) => latest = Some(*c),
+                        Command::Apply(c, seen) => latest = Some((*c, seen)),
                         Command::SetSource { name, level } => {
                             sources.insert(name, level);
                         }
@@ -923,7 +945,7 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
                     }
                     last_refresh = None;
                 }
-                if latest.is_some_and(|c| engine.apply(c)) {
+                if latest.is_some_and(|(c, seen)| engine.apply(c, seen)) {
                     last_refresh = None;
                 }
                 if shutdown {

@@ -1026,7 +1026,7 @@ impl eframe::App for LinuxLinkApp {
         }
 
         if self.cfg != before {
-            self.engine.send(Command::Apply(Box::new(self.cfg.clone())));
+            self.engine.send(Command::Apply(Box::new(self.cfg.clone()), self.seen_listen_switches));
             *self.shared.lock().unwrap() = self.cfg.clone();
         }
         ctx.request_repaint_after(Duration::from_millis(33));

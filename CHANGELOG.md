@@ -18,6 +18,10 @@ update, and as the notes of the matching GitHub release.
 - **No more silence after a Bluetooth hiccup.** Bluetooth outputs sometimes
   fail when audio starts ("Failure in Bluetooth audio transport") and then
   stay silent; LinuxLink now notices and reconnects them by itself.
+- An automatic switch (for example to a headset you just connected) could be
+  undone by a settings change made at the same moment; it now sticks.
+- Your microphone volume is also protected when a headset or other device
+  connects or disconnects, not only when LinuxLink itself changes devices.
 - LinuxLink now rebuilds its connection to a device that went away and came
   back, instead of staying silent until you picked another device and back.
 - LinuxLink no longer switches your listening device at startup just because
