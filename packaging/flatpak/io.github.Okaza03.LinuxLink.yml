@@ -55,6 +55,8 @@ modules:
       - install -Dm755 target/release/linuxlink /app/bin/linuxlink
       - install -Dm644 packaging/linux/io.github.Okaza03.LinuxLink.desktop /app/share/applications/io.github.Okaza03.LinuxLink.desktop
       - install -Dm644 packaging/linux/io.github.Okaza03.LinuxLink.svg /app/share/icons/hicolor/scalable/apps/io.github.Okaza03.LinuxLink.svg
+      - install -Dm644 packaging/linux/io.github.Okaza03.LinuxLink-128.png /app/share/icons/hicolor/128x128/apps/io.github.Okaza03.LinuxLink.png
+      - install -Dm644 packaging/linux/io.github.Okaza03.LinuxLink-256.png /app/share/icons/hicolor/256x256/apps/io.github.Okaza03.LinuxLink.png
       - install -Dm644 packaging/linux/io.github.Okaza03.LinuxLink.metainfo.xml /app/share/metainfo/io.github.Okaza03.LinuxLink.metainfo.xml
     sources:
       - type: dir

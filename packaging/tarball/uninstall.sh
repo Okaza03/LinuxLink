@@ -13,6 +13,8 @@ fi
 rm -f "$PREFIX/bin/linuxlink" \
   "$PREFIX/share/applications/$ID.desktop" \
   "$PREFIX/share/icons/hicolor/scalable/apps/$ID.svg" \
+  "$PREFIX/share/icons/hicolor/128x128/apps/$ID.png" \
+  "$PREFIX/share/icons/hicolor/256x256/apps/$ID.png" \
   "$PREFIX/share/metainfo/$ID.metainfo.xml" \
   "$HOME/.config/autostart/$ID.desktop"
 

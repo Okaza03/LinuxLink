@@ -43,6 +43,9 @@ package() {
   install -Dm755 target/release/linuxlink "$pkgdir/usr/bin/linuxlink"
   install -Dm644 "packaging/linux/$id.desktop" "$pkgdir/usr/share/applications/$id.desktop"
   install -Dm644 "packaging/linux/$id.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$id.svg"
+  for size in 128 256; do
+    install -Dm644 "packaging/linux/$id-$size.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/$id.png"
+  done
   install -Dm644 "packaging/linux/$id.metainfo.xml" "$pkgdir/usr/share/metainfo/$id.metainfo.xml"
   install -Dm644 LICENSE-MIT LICENSE-APACHE -t "$pkgdir/usr/share/licenses/$pkgname/"
   install -Dm644 README.md CHANGELOG.md -t "$pkgdir/usr/share/doc/$pkgname/"

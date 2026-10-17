@@ -185,6 +185,12 @@ fn stage_files(prefix: &Path) -> Result<(), String> {
     fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).map_err(|e| e.to_string())?;
     copy(&linux_file("desktop"), &prefix.join(format!("share/applications/{APP_ID}.desktop")))?;
     copy(&linux_file("svg"), &prefix.join(format!("share/icons/hicolor/scalable/apps/{APP_ID}.svg")))?;
+    for size in [128, 256] {
+        copy(
+            &root().join(format!("packaging/linux/{APP_ID}-{size}.png")),
+            &prefix.join(format!("share/icons/hicolor/{size}x{size}/apps/{APP_ID}.png")),
+        )?;
+    }
     copy(&linux_file("metainfo.xml"), &prefix.join(format!("share/metainfo/{APP_ID}.metainfo.xml")))
 }
 

@@ -13,6 +13,9 @@ ID=io.github.Okaza03.LinuxLink
 
 install -Dm755 "$HERE/linuxlink" "$PREFIX/bin/linuxlink"
 install -Dm644 "$HERE/share/icons/hicolor/scalable/apps/$ID.svg" "$PREFIX/share/icons/hicolor/scalable/apps/$ID.svg"
+for size in 128 256; do
+  install -Dm644 "$HERE/share/icons/hicolor/${size}x${size}/apps/$ID.png" "$PREFIX/share/icons/hicolor/${size}x${size}/apps/$ID.png"
+done
 install -Dm644 "$HERE/share/metainfo/$ID.metainfo.xml" "$PREFIX/share/metainfo/$ID.metainfo.xml"
 mkdir -p "$PREFIX/share/applications"
 # Point the menu entry at the installed binary, in case it isn't on PATH.
