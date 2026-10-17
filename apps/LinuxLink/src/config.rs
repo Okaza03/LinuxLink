@@ -91,6 +91,8 @@ pub struct Config {
     pub last_seen_version: Option<String>,
     /// Closing the window minimizes instead of quitting, so audio keeps working.
     pub close_to_tray: bool,
+    /// AppImage only: keep a LinuxLink entry (and icon) in the app menu.
+    pub appimage_menu_entry: bool,
 }
 
 impl Default for Config {
@@ -145,6 +147,7 @@ impl Default for Config {
             latency_ms: 20,
             last_seen_version: None,
             close_to_tray: true,
+            appimage_menu_entry: true,
         }
     }
 }
@@ -248,6 +251,7 @@ mod tests {
         cfg.latency_ms = 40;
         cfg.last_seen_version = Some("0.1.0".into());
         cfg.close_to_tray = false;
+        cfg.appimage_menu_entry = false;
 
         let text = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();

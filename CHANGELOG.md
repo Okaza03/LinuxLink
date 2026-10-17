@@ -9,6 +9,15 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The AppImage now appears in your app menu** and its window shows the
+  LinuxLink icon in the taskbar. It adds a menu entry on start (turn this off
+  in **Settings → General → Show in app menu**), keeps it pointing at the
+  AppImage if you move it, and the entry disappears if you delete the file.
+- Updating an AppImage that still has its download name renames it to the new
+  version, instead of leaving the old version number in the file name.
+
 ## [0.1.0] - 2026-10-17
 
 The first release of LinuxLink: a Wave Link 3 style audio mixer for Linux,

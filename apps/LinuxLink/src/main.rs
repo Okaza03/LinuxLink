@@ -3,6 +3,7 @@ mod config;
 mod engine;
 mod icons;
 mod instance;
+mod integrate;
 mod meter;
 mod pactl;
 mod sys;
@@ -45,6 +46,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut cfg = Config::load();
+    integrate::on_start(cfg.appimage_menu_entry);
     let defaults = engine::prepare(&mut cfg)?;
     let engine = engine::spawn(cfg.clone(), defaults);
     let updater = updater::Updater::start();
@@ -101,6 +103,7 @@ fn run_window(
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
             .with_app_id(APP_ID)
+            .with_icon(eframe::icon_data::from_png_bytes(integrate::ICON_256).expect("bundled icon is a valid PNG"))
             .with_inner_size([1560.0, 900.0])
             .with_min_inner_size([900.0, 520.0]),
         ..Default::default()

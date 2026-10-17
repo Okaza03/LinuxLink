@@ -416,6 +416,23 @@ impl LinuxLinkApp {
                         toggle(ui, &mut self.cfg.close_to_tray);
                     },
                 );
+                if let (Some(_), Some(data_dir)) = (crate::integrate::appimage_path(), dirs::data_dir()) {
+                    row_divider(ui);
+                    settings_row(
+                        ui,
+                        "Show in app menu",
+                        "Adds this AppImage to your app menu, which also gives its window the right icon.",
+                        |ui| {
+                            if toggle(ui, &mut self.cfg.appimage_menu_entry).changed() {
+                                if self.cfg.appimage_menu_entry {
+                                    crate::integrate::on_start(true);
+                                } else {
+                                    crate::integrate::remove(&data_dir);
+                                }
+                            }
+                        },
+                    );
+                }
                 row_divider(ui);
                 settings_row(ui, "Start with your computer", "Launch LinuxLink in the tray when you log in.", |ui| {
                     let mut on = autostart_path().is_some_and(|p| p.exists());

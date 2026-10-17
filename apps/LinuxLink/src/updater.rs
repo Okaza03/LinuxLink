@@ -136,6 +136,8 @@ struct State {
     release: Option<Release>,
     busy: bool,
     restart: Option<PathBuf>,
+    /// Where an in-place update put the new version, if it moved.
+    installed_at: Option<PathBuf>,
 }
 
 pub struct Updater {
@@ -188,11 +190,12 @@ impl Updater {
     }
 
     fn request_restart(&self) {
+        let mut st = self.state.lock().unwrap();
         let path = match &self.kind {
-            InstallKind::AppImage(p) | InstallKind::Tarball(p) => Some(p.clone()),
+            InstallKind::AppImage(p) | InstallKind::Tarball(p) => Some(st.installed_at.clone().unwrap_or(p.clone())),
             _ => None,
         };
-        self.state.lock().unwrap().restart = path;
+        st.restart = path;
     }
 
     /// The program to launch after LinuxLink closes, if a restart was asked for.
@@ -260,7 +263,19 @@ impl Updater {
                 let part = path.with_file_name(format!(".{name}.part"));
                 download(&asset.browser_download_url, &part, &expected, progress)?;
                 make_executable(&part)?;
-                std::fs::rename(&part, path).with_context(|| format!("replacing {}", path.display()))?;
+                // An AppImage still named after its release gets the new
+                // version's name; one the user renamed keeps its name.
+                let current_name = InstallKind::AppImage(PathBuf::new()).asset_name(VERSION);
+                let renamed = path.file_name().and_then(|n| n.to_str()) == current_name.as_deref();
+                let target = if renamed { path.with_file_name(&name) } else { path.clone() };
+                std::fs::rename(&part, &target).with_context(|| format!("installing {}", target.display()))?;
+                if target != *path {
+                    let _ = std::fs::remove_file(path);
+                }
+                if let Some(data_dir) = dirs::data_dir().filter(|d| crate::integrate::installed(d)) {
+                    let _ = crate::integrate::install(&data_dir, &target);
+                }
+                self.state.lock().unwrap().installed_at = Some(target);
                 Ok(Status::ReadyToRestart { version: version.to_string() })
             }
             InstallKind::Tarball(exe) => {
