@@ -9,6 +9,10 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-17
+
+Bluetooth headsets now just work, and the microphone volume stays put.
+
 ### Fixed
 
 - **Bluetooth headsets just work.** A headset you connect becomes your
@@ -142,6 +146,7 @@ built on PipeWire.
   Flatpak, .deb (Debian, Ubuntu, Mint, Pop!_OS), .rpm (Fedora, openSUSE), an
   Arch Linux package, and a plain tarball.
 
-[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Okaza03/LinuxLink/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Okaza03/LinuxLink/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Okaza03/LinuxLink/releases/tag/v0.1.0
