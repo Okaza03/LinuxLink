@@ -19,6 +19,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub const PREFIX: &str = "linuxlink_";
+/// How long input volumes are protected after LinuxLink changes devices.
+const GUARD_FOR: Duration = Duration::from_secs(3);
 /// `application.id` of LinuxLink's own streams, to tell them from apps.
 pub const STREAM_TAG: &str = "linuxlink";
 
@@ -80,6 +82,10 @@ pub struct Snapshot {
     pub outputs: Vec<Device>,
     pub inputs: Vec<Device>,
     pub errors: Vec<String>,
+    /// The engine's listening device, and how often it switched by itself
+    /// (when you picked another output in the system's volume controls).
+    pub listen_output: Option<String>,
+    pub listen_switches: u64,
 }
 
 /// A loopback module. `module` is `None` when loading failed (device
@@ -125,6 +131,14 @@ struct Engine {
     snapshot: Arc<Mutex<Snapshot>>,
     dirty_since: Option<Instant>,
     needs_sync: bool,
+    /// Hardware outputs seen in the last refresh.
+    known_sinks: HashSet<String>,
+    /// Volume and mute of each input device, as of the last refresh.
+    input_levels: HashMap<String, (u32, bool)>,
+    /// Until when input volumes are protected after LinuxLink added or
+    /// removed devices (see `guard_inputs`).
+    guard_until: Option<Instant>,
+    listen_switches: u64,
 }
 
 /// Removes modules left behind by a previous run that didn't exit cleanly.
@@ -169,6 +183,11 @@ pub fn prepare(cfg: &mut Config) -> Result<Defaults> {
             .and_then(|m| m.outputs.iter().find(|o| *o != DEFAULT_OUTPUT && sinks.iter().any(|s| &s.name == *o)))
             .cloned();
         cfg.listen_output = heard.or_else(|| (!prev.is_empty()).then(|| prev.clone()));
+    }
+    // The system output changed while LinuxLink was closed (or this is the
+    // first start with this setting): listen where the system plays now.
+    if !prev.is_empty() && cfg.last_system_output.as_ref() != Some(&prev) {
+        cfg.listen_output = Some(prev.clone());
     }
     for mix in &mut cfg.mixes {
         for out in &mut mix.outputs {
@@ -329,6 +348,7 @@ impl Engine {
             changed = true;
         }
 
+        let listen_target = self.listen_target();
         for mix in self.cfg.mixes.clone() {
             if !self.mixes.contains_key(&mix.id) {
                 if let Some(rt) = self.create_mix(&mix) {
@@ -337,7 +357,7 @@ impl Engine {
                 }
             }
             let mut outputs = mix.outputs.clone();
-            if let Some(listen) = self.cfg.listen_output.as_ref().filter(|_| self.cfg.listening.contains(&mix.id)) {
+            if let Some(listen) = listen_target.as_ref().filter(|_| self.cfg.listening.contains(&mix.id)) {
                 if !outputs.contains(listen) {
                     outputs.push(listen.clone());
                 }
@@ -391,6 +411,7 @@ impl Engine {
         }
 
         if changed {
+            self.guard_until = Some(Instant::now() + GUARD_FOR);
             // Recreated sinks drop their streams and the default; re-route them.
             self.seen_streams.clear();
             self.applied_default = None;
@@ -428,10 +449,72 @@ impl Engine {
             .map(|c| channel_sink(&c.id))
     }
 
+    /// Some apps (Discord's voice engine, for one) reset the system microphone
+    /// volume whenever devices appear or disappear, which LinuxLink's own
+    /// changes cause. For a moment after each such change, put the input
+    /// channels' volumes back to what they were; otherwise just track them.
+    fn guard_inputs(&mut self, sources: &[Device]) {
+        let guarding = self.guard_until.is_some_and(|t| Instant::now() < t);
+        if !guarding {
+            self.guard_until = None;
+        }
+        for s in sources {
+            let Some(volume) = s.volume else { continue };
+            let input_channel =
+                self.cfg.channels.iter().any(|c| matches!(&c.kind, ChannelKind::Input { source } if *source == s.name));
+            match self.input_levels.get(&s.name) {
+                Some(&(was, was_muted))
+                    if guarding && input_channel && (was.abs_diff(volume) > 1 || was_muted != s.muted) =>
+                {
+                    eprintln!("linuxlink: another app changed {} to {volume}%; restoring {was}%", s.name);
+                    let _ = pactl::set_source_volume(&s.name, was);
+                    let _ = pactl::set_source_mute(&s.name, was_muted);
+                }
+                _ => {
+                    self.input_levels.insert(s.name.clone(), (volume, s.muted));
+                }
+            }
+        }
+    }
+
+    /// Where the mixes you listen to play: your listening device, or the
+    /// system's previous output while that device is disconnected.
+    fn listen_target(&self) -> Option<String> {
+        let wanted = self.cfg.listen_output.clone()?;
+        if self.known_sinks.is_empty() || self.known_sinks.contains(&wanted) || self.prev_default.is_empty() {
+            Some(wanted)
+        } else {
+            Some(self.prev_default.clone())
+        }
+    }
+
     fn refresh(&mut self) -> Result<()> {
         let sinks = pactl::sinks()?;
         let sources = pactl::sources()?;
         let inputs = pactl::sink_inputs()?;
+
+        // Follow the listening device as outputs come and go.
+        self.guard_inputs(&sources);
+        let hardware: HashSet<String> = sinks.iter().filter(|s| !is_ours(&s.name)).map(|s| s.name.clone()).collect();
+        if hardware != self.known_sinks {
+            let before = self.listen_target();
+            self.known_sinks = hardware;
+            self.needs_sync |= self.listen_target() != before;
+        }
+        // You picked another output (e.g. in the volume applet) while
+        // LinuxLink owns the default: listen there, and route apps through
+        // LinuxLink again.
+        if let Some(Some(ours)) = &self.applied_default {
+            if let Ok(current) = pactl::default_sink() {
+                if current != *ours && !is_ours(&current) && self.known_sinks.contains(&current) {
+                    self.cfg.listen_output = Some(current);
+                    self.listen_switches += 1;
+                    self.dirty_since.get_or_insert_with(Instant::now);
+                    self.applied_default = None;
+                    self.needs_sync = true;
+                }
+            }
+        }
 
         // Re-apply anything that drifted, e.g. WirePlumber restoring a saved
         // stream volume or another mixer app touching our streams.
@@ -522,6 +605,8 @@ impl Engine {
         snap.apps = apps;
         snap.outputs = sinks.into_iter().filter(|s| !is_ours(&s.name)).collect();
         snap.inputs = sources.into_iter().filter(|s| is_hardware_source(&s.name)).collect();
+        snap.listen_output = self.cfg.listen_output.clone();
+        snap.listen_switches = self.listen_switches;
         Ok(())
     }
 
@@ -598,9 +683,29 @@ impl Engine {
     }
 
     fn shutdown(&mut self) {
-        if !self.prev_default.is_empty() {
-            let _ = pactl::set_default_sink(&self.prev_default);
+        // Leave the system output on the device you were listening on.
+        let target = self.listen_target().filter(|t| !t.is_empty()).unwrap_or_else(|| self.prev_default.clone());
+        if !target.is_empty() {
+            let _ = pactl::set_default_sink(&target);
+            self.cfg.last_system_output = Some(target);
         }
+
+        // Taking LinuxLink's devices away makes some apps (Discord's voice
+        // engine, for one) reset the system microphone volume. Put the input
+        // channels back to the levels they had while LinuxLink was running.
+        let guarded: Vec<(String, u32, bool)> = self
+            .cfg
+            .channels
+            .iter()
+            .filter_map(|c| match &c.kind {
+                ChannelKind::Input { source } => {
+                    let (volume, muted) = *self.input_levels.get(source)?;
+                    Some((source.clone(), volume, muted))
+                }
+                ChannelKind::Virtual => None,
+            })
+            .collect();
+
         for (_, l) in self.sends.drain() {
             l.unload();
         }
@@ -614,6 +719,19 @@ impl Engine {
         }
         if let Err(e) = self.cfg.save() {
             eprintln!("linuxlink: saving config: {e:#}");
+        }
+
+        for _ in 0..6 {
+            std::thread::sleep(Duration::from_millis(500));
+            let Ok(now) = pactl::sources() else { break };
+            for (name, volume, muted) in &guarded {
+                let Some(s) = now.iter().find(|s| &s.name == name) else { continue };
+                if s.volume.is_some_and(|v| v.abs_diff(*volume) > 1) || s.muted != *muted {
+                    eprintln!("linuxlink: {name} volume was changed on exit; restoring {volume}%");
+                    let _ = pactl::set_source_volume(name, *volume);
+                    let _ = pactl::set_source_mute(name, *muted);
+                }
+            }
         }
     }
 }
@@ -649,6 +767,10 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
         mixes: HashMap::new(),
         sends: HashMap::new(),
         applied_default: None,
+        known_sinks: HashSet::new(),
+        input_levels: HashMap::new(),
+        guard_until: None,
+        listen_switches: 0,
         seen_streams: HashSet::new(),
         live_apps: Vec::new(),
         snapshot: snapshot.clone(),
@@ -659,6 +781,10 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
     let join = std::thread::Builder::new()
         .name("linuxlink-engine".into())
         .spawn(move || {
+            // Baseline input volumes before LinuxLink adds its devices.
+            if let Ok(sources) = pactl::sources() {
+                engine.guard_inputs(&sources);
+            }
             engine.sync_graph();
             let mut last_refresh: Option<Instant> = None;
             loop {
@@ -684,6 +810,8 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
                     }
                 }
                 for (name, level) in sources {
+                    // Your own change: the new baseline for the guard.
+                    engine.input_levels.insert(name.clone(), (level.volume, level.muted));
                     let r = pactl::set_source_volume(&name, level.volume)
                         .and_then(|()| pactl::set_source_mute(&name, level.muted));
                     if let Err(e) = r {

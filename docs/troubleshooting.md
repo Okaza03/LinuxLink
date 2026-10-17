@@ -21,7 +21,8 @@ Also check that PipeWire's PulseAudio layer runs: `pactl info` should print
 ## I hear nothing
 
 - Check the **🎧 toggle**: at least one mix must be on for you to hear it.
-- Check the **listening device** in the top-right corner.
+- Check the **listening device** in the top-right corner. It is where the
+  mixes you listen to play, not necessarily your system's default output.
 - Check the channel's mute button and the mix's cell (red means muted).
 - Is the app in the channel you think? Its icon appears on the channel; the
   channel's level meter moves when it plays.
@@ -32,6 +33,14 @@ Some apps report a different name than their launcher. Open the channel,
 search for the app while it is playing and tick the entry marked
 **● playing**. If an app plays before LinuxLink starts, LinuxLink moves it as
 soon as it starts.
+
+## My microphone volume changes by itself
+
+Some apps reset the system microphone volume whenever audio devices appear or
+disappear. Discord's **Automatic Gain Control** (Settings → Voice & Video) is a
+common cause, and Steam's voice settings can do it too. LinuxLink restores
+your input volumes right after its own device changes, but the app may still
+change them at other times: turn its automatic gain control off.
 
 ## Crackling or dropouts
 

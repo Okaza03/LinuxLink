@@ -93,6 +93,9 @@ pub struct Config {
     pub close_to_tray: bool,
     /// AppImage only: keep a LinuxLink entry (and icon) in the app menu.
     pub appimage_menu_entry: bool,
+    /// The system output LinuxLink left set when it last quit. If it differs
+    /// at the next start, you switched outputs meanwhile and LinuxLink follows.
+    pub last_system_output: Option<String>,
 }
 
 impl Default for Config {
@@ -148,6 +151,7 @@ impl Default for Config {
             last_seen_version: None,
             close_to_tray: true,
             appimage_menu_entry: true,
+            last_system_output: None,
         }
     }
 }
@@ -252,6 +256,7 @@ mod tests {
         cfg.last_seen_version = Some("0.1.0".into());
         cfg.close_to_tray = false;
         cfg.appimage_menu_entry = false;
+        cfg.last_system_output = Some("alsa_output.usb-headset".into());
 
         let text = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();

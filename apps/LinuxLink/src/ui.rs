@@ -81,6 +81,8 @@ pub struct LinuxLinkApp {
     /// Settings shared with `main`, so a window reopened from the tray
     /// starts exactly where the last one left off.
     shared: Arc<Mutex<Config>>,
+    /// Listening-device switches made by the engine that this window adopted.
+    seen_listen_switches: u64,
 }
 
 impl LinuxLinkApp {
@@ -115,6 +117,7 @@ impl LinuxLinkApp {
             updater,
             whats_new: notes,
             shared,
+            seen_listen_switches: 0,
         }
     }
 
@@ -981,6 +984,11 @@ impl eframe::App for LinuxLinkApp {
         let snap = self.engine.snapshot.lock().unwrap().clone();
         let before = self.cfg.clone();
         self.learn_apps(&snap);
+        // You switched outputs in the system's volume controls.
+        if snap.listen_switches > self.seen_listen_switches {
+            self.seen_listen_switches = snap.listen_switches;
+            self.cfg.listen_output = snap.listen_output.clone();
+        }
 
         let now = Instant::now();
         let dt = (now - self.last_frame).as_secs_f32();

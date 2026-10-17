@@ -61,7 +61,8 @@ fn main() -> anyhow::Result<()> {
     let handle = engine.clone();
     ctrlc::set_handler(move || {
         tray::quit();
-        std::thread::sleep(Duration::from_secs(3));
+        // Normal shutdown takes a few seconds (it guards the mic volume).
+        std::thread::sleep(Duration::from_secs(10));
         handle.shutdown();
         std::process::exit(0);
     })?;

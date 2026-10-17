@@ -11,6 +11,18 @@ update, and as the notes of the matching GitHub release.
 
 ### Fixed
 
+- **No more silence after switching outputs.** Your listening device now
+  follows your choices: pick another output in your desktop's volume
+  controls while LinuxLink runs and your mixes move there; switch outputs
+  while LinuxLink is closed and it listens there on the next start. If your
+  listening device is disconnected, LinuxLink plays on the system's output
+  until it's back, and when LinuxLink quits it leaves the system playing on
+  the device you were listening on.
+- **Your microphone volume no longer jumps** when LinuxLink starts or quits.
+  Some apps (Discord's automatic gain control, for one) reset the system
+  microphone volume whenever audio devices appear or disappear; LinuxLink now
+  puts your input devices back to their previous volume right after its own
+  device changes, while leaving your own changes alone.
 - **The AppImage now appears in your app menu** and its window shows the
   LinuxLink icon in the taskbar. It adds a menu entry on start (turn this off
   in **Settings → General → Show in app menu**), keeps it pointing at the
