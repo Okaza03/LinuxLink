@@ -29,8 +29,29 @@ Volumes map onto that graph like this:
 - **A mix's master** is the volume of the mix sink.
 
 Apps are routed by moving their streams (`pactl move-sink-input`) into a
-channel sink. Rules are stored per application and matched against the
-stream's binary name, application name or Flatpak app ID.
+channel sink. Each stream is first identified (`apps::AppIndex::identify`):
+streams often carry a library's name, so LinuxLink matches the stream's Flatpak
+id, application name and executable against installed menu entries (desktop
+id, `Exec`, `StartupWMClass`, `Name`; Steam games via `steam://rungameid/`).
+Rules are stored per identity and also matched against the stream's raw
+binary name, application name and Flatpak id.
+
+## Devices coming and going
+
+Every refresh the engine compares the device list with the last one:
+
+- A **Bluetooth output that just appeared** becomes the listening device.
+- If the **listening device disappeared**, it falls back to the most recently
+  connected Bluetooth output, the previous system output, then any output.
+- Loopbacks that PipeWire removed with their device are rebuilt.
+- Bluetooth outputs LinuxLink feeds are checked every two seconds
+  (`pw-cli info`); one stuck in the `error` state is suspended and reconnected.
+- After any device change (and after LinuxLink's own changes) input-channel
+  volumes are guarded for three seconds, because apps such as Discord reset
+  the system microphone volume when devices change.
+- If you pick another output in the desktop's volume controls, LinuxLink takes
+  that as your new listening device and makes its System channel the default
+  again.
 
 ## Code map
 
@@ -47,7 +68,10 @@ All code lives in `apps/LinuxLink/src/`:
 | `updater.rs` | Update checks, downloads, verification and installation |
 | `whats_new.rs` | Release notes from `CHANGELOG.md`, compiled in |
 | `tray.rs` | System tray icon (StatusNotifierItem via `ksni`) |
-| `apps.rs`, `icons.rs` | Installed applications and icon lookup |
+| `apps.rs` | Installed applications, and identifying the app behind each audio stream |
+| `icons.rs` | Icon lookup in the icon themes |
+| `instance.rs` | One instance per session; a second launch shows the running window |
+| `integrate.rs` | The AppImage's own app-menu entry and icons |
 | `sys.rs` | Flatpak specifics: running host tools, host paths |
 | `variant.rs` | Release build vs. local *LinuxLink Test* build |
 

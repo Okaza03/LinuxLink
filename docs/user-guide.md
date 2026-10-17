@@ -87,6 +87,49 @@ example *LinuxLink Stream*.
 A common setup: your microphone, game and music in **Stream**, your voice chat
 and everything else in **My Mix**, with 🎧 on for My Mix only.
 
+## How LinuxLink recognizes apps
+
+Audio streams don't always say which app they belong to: Discord's calls are
+called "WEBRTC VoiceEngine", Steam's are "Chromium", and Proton games report
+their Windows program name ("deadlock.exe"). LinuxLink matches each stream to
+the app's menu entry for its real name and icon:
+
+- **Flatpak apps** by their app ID.
+- **Steam games** by their Steam menu entry, so a game shows up once, with its
+  Steam name and icon, whether Steam or Proton plays its audio.
+- **Other apps** by their program name, menu entry or window class.
+- Your desktop's notification and feedback sounds are grouped as
+  **System sounds**.
+
+Apps without a menu entry are shown with the name their stream reports. When
+you put an app in a channel, LinuxLink remembers it by this identity, so the
+choice keeps working across restarts and updates.
+
+## Bluetooth headsets
+
+- **Connecting a headset makes it your listening device**, like on a phone:
+  your mixes move to it automatically.
+- **If it disconnects**, LinuxLink carries on with the most recently connected
+  other headset, else your previous output, so you're never left with silence.
+- If a Bluetooth connection fails mid-stream (it happens: "Failure in Bluetooth
+  audio transport"), LinuxLink notices and reconnects within a few seconds.
+- Bluetooth adds noticeable delay; that's the headset, not LinuxLink.
+
+## Mouse and keyboard
+
+| Action | Does |
+| --- | --- |
+| Click a channel's icon or name | Opens the channel's settings (apps, name, icon, input device) |
+| Click a mix's header | Opens the mix's settings (name, icon, extra outputs) |
+| Click 🎧 on a mix header | Turns hearing that mix on or off |
+| Click **+** on an empty cell | Adds that channel to that mix |
+| Right-click a cell | **Remove from this mix** |
+| Click a speaker button | Mutes or unmutes (red means muted) |
+| Drag a fader | Sets the volume; snaps to 25%, 50% and 75% when close |
+| Search box in a channel | Type to find any installed app |
+| Left-click the tray icon | Opens the window |
+| Right-click the tray icon | **Open LinuxLink** / **Quit** |
+
 ## Your devices
 
 The sidebar lists your input devices. Click one to set its gain, mute it, watch
@@ -105,13 +148,21 @@ its level, or **Add as channel**.
 ## Closing, the tray and starting with your computer
 
 LinuxLink has to keep running for your channels and mixes to work. Closing the
-window therefore **minimizes** it to the taskbar, and a LinuxLink icon appears
-in the system tray. Click the tray icon to bring the window back, or right-click
-it and choose **Quit**. You can also quit with **Quit LinuxLink** at the bottom
-of the sidebar.
+window (X) therefore closes only the window: LinuxLink keeps running, with an
+icon in the system tray, and your audio keeps working. To get the window back,
+click the tray icon, choose **Open LinuxLink** from its menu, or start
+LinuxLink from your app menu again. To quit for real, right-click the tray
+icon and choose **Quit**, or use **Quit LinuxLink** at the bottom of the
+sidebar.
 
-When LinuxLink quits, it removes all of its virtual devices and puts your
-previous default output back.
+If your desktop has no system tray, closing the window minimizes it to the
+taskbar instead, so LinuxLink can't get lost.
+
+**Start with your computer** (Settings → General) starts LinuxLink in the tray
+when you log in, without opening the window.
+
+When LinuxLink quits, it removes all of its virtual devices and leaves your
+system playing on the device you were listening on.
 
 To quit when the window is closed instead, turn off **Settings → General →
 Keep running when closed**.
@@ -139,4 +190,12 @@ Everything you set up is saved automatically in
 `~/.var/app/io.github.Okaza03.LinuxLink/config/linuxlink/config.toml`) and
 restored when LinuxLink starts again, including after a reboot.
 
-To start over, quit LinuxLink and delete that file.
+To start over, quit LinuxLink and delete that file. Every setting is described
+in the [configuration reference](configuration.md).
+
+## More
+
+- [Setups](setups.md): step-by-step recipes for OBS, Discord, recording and
+  more.
+- [Installing, updating and removing](installing.md)
+- [FAQ](faq.md) and [troubleshooting](troubleshooting.md)

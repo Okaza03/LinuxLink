@@ -31,8 +31,10 @@ every channel. It is modelled on Elgato Wave Link 3 and built on PipeWire.
   meters.
 - **Faders that feel right:** level meters in every track, ticks every 10%,
   snapping to 25/50/75%.
-- **Stays out of the way.** Closing the window keeps your audio running in the
-  taskbar and tray; optionally start with your computer.
+- **Stays out of the way.** Closing the window keeps LinuxLink running in the
+  system tray; optionally start with your computer.
+- **Bluetooth headsets just work:** connect one and your mixes move to it.
+- **Apps by their real name and icon**, including Steam and Proton games.
 - **Remembers everything** across restarts and reboots.
 - **Updates itself** (AppImage, tarball) or hands verified packages to your
   system installer (.deb, .rpm, Flatpak), with a **What's new** window after
@@ -53,7 +55,8 @@ Every release has packages for **x86_64** and **ARM64 (aarch64)**.
 | **Arch, CachyOS, EndeavourOS, Manjaro** | `linuxlink-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U linuxlink-*.pkg.tar.zst`, or build [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD) |
 | **Anything else** | `linuxlink-<version>-x86_64-linux.tar.gz` | Unpack it and run `./install.sh`. Updates itself. |
 
-On ARM64, pick the `aarch64` / `arm64` file instead. Every release also has a
+On ARM64, pick the `aarch64` / `arm64` file instead. Details, updating and
+uninstalling for each format: [docs/installing.md](docs/installing.md). Every release also has a
 `SHA256SUMS` file: `sha256sum -c SHA256SUMS --ignore-missing`.
 
 ### Requirements
@@ -81,8 +84,12 @@ The [user guide](docs/user-guide.md) explains everything in detail.
 
 ## Documentation
 
-- [User guide](docs/user-guide.md): channels, mixes, OBS and Discord, settings
-- [Troubleshooting](docs/troubleshooting.md)
+- [User guide](docs/user-guide.md): channels, mixes, devices, settings, the tray
+- [Setups](docs/setups.md): step-by-step recipes for streaming with OBS, Discord
+  calls, recording and Bluetooth headsets
+- [Installing, updating and removing](docs/installing.md), for every package format
+- [FAQ](docs/faq.md) and [troubleshooting](docs/troubleshooting.md)
+- [Configuration reference](docs/configuration.md): every setting and command-line option
 - [How it works](docs/how-it-works.md): the PipeWire graph behind LinuxLink
 - [Building from source](docs/building.md)
 - [Releasing](docs/releasing.md)
