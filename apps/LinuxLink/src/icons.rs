@@ -4,8 +4,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const SUBDIRS: &[&str] = &[
-    "64x64/apps", "48x48/apps", "128x128/apps", "256x256/apps", "scalable/apps",
-    "apps/64", "apps/48", "apps/scalable", "32x32/apps",
+    "64x64/apps",
+    "48x48/apps",
+    "128x128/apps",
+    "256x256/apps",
+    "scalable/apps",
+    "apps/64",
+    "apps/48",
+    "apps/scalable",
+    "32x32/apps",
 ];
 
 pub struct IconCache {
@@ -21,15 +28,11 @@ impl IconCache {
             home.join(".icons"),
             home.join(".local/share/flatpak/exports/share/icons"),
             PathBuf::from("/var/lib/flatpak/exports/share/icons"),
-            PathBuf::from("/usr/share/icons"),
+            crate::sys::host_path("/usr/share/icons"),
         ];
         let mut names: Vec<String> = current_theme().into_iter().collect();
         names.extend(["hicolor", "breeze-dark", "breeze", "Papirus-Dark", "Papirus", "Adwaita"].map(String::from));
-        let themes = names
-            .iter()
-            .flat_map(|t| bases.iter().map(move |b| b.join(t)))
-            .filter(|p| p.is_dir())
-            .collect();
+        let themes = names.iter().flat_map(|t| bases.iter().map(move |b| b.join(t))).filter(|p| p.is_dir()).collect();
         Self { themes, found: HashMap::new() }
     }
 
@@ -61,13 +64,14 @@ impl IconCache {
                 }
             }
         }
-        candidates.iter().flat_map(|n| ["png", "svg"].map(|e| PathBuf::from(format!("/usr/share/pixmaps/{n}.{e}")))).find(|p| p.is_file())
+        let pixmaps = crate::sys::host_path("/usr/share/pixmaps");
+        candidates.iter().flat_map(|n| ["png", "svg"].map(|e| pixmaps.join(format!("{n}.{e}")))).find(|p| p.is_file())
     }
 }
 
 /// The KDE icon theme, if configured.
 fn current_theme() -> Option<String> {
-    let s = std::fs::read_to_string(dirs::config_dir()?.join("kdeglobals")).ok()?;
+    let s = std::fs::read_to_string(crate::sys::host_config_dir()?.join("kdeglobals")).ok()?;
     let mut in_icons = false;
     for line in s.lines() {
         let line = line.trim();

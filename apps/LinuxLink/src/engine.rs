@@ -19,7 +19,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub const PREFIX: &str = "linuxlink_";
-pub const APP_ID: &str = "linuxlink";
+/// `application.id` of LinuxLink's own streams, to tell them from apps.
+pub const STREAM_TAG: &str = "linuxlink";
 
 pub fn channel_sink(id: &str) -> String {
     format!("{PREFIX}ch_{id}")
@@ -199,7 +200,7 @@ pub fn prepare(cfg: &mut Config) -> Result<Defaults> {
 fn loopback(source: &str, sink: &str, label: &str, latency_ms: u32) -> Result<u32> {
     let props = proplist(&[
         ("media.name", label),
-        ("application.id", APP_ID),
+        ("application.id", STREAM_TAG),
         ("application.name", "LinuxLink"),
         // Keep WirePlumber from restoring old volumes over ours.
         ("state.restore-props", "false"),
@@ -221,10 +222,7 @@ fn loopback(source: &str, sink: &str, label: &str, latency_ms: u32) -> Result<u3
 fn null_sink(name: &str, description: &str) -> Result<u32> {
     pactl::load_module(
         "module-null-sink",
-        &[
-            format!("sink_name={name}"),
-            format!("sink_properties={}", proplist(&[("device.description", description)])),
-        ],
+        &[format!("sink_name={name}"), format!("sink_properties={}", proplist(&[("device.description", description)]))],
     )
 }
 
@@ -272,9 +270,9 @@ impl Engine {
 
     fn create_channel(&self, ch: &ChannelCfg) -> ChannelRt {
         let sink_module = match ch.kind {
-            ChannelKind::Virtual => null_sink(&channel_sink(&ch.id), &format!("LinuxLink {}", ch.name))
-                .map_err(|e| self.report(e))
-                .ok(),
+            ChannelKind::Virtual => {
+                null_sink(&channel_sink(&ch.id), &format!("LinuxLink {}", ch.name)).map_err(|e| self.report(e)).ok()
+            }
             ChannelKind::Input { .. } => None,
         };
         ChannelRt { name: ch.name.clone(), kind: ch.kind.clone(), sink_module }
@@ -484,7 +482,7 @@ impl Engine {
         self.seen_streams.retain(|i| live.contains(i));
 
         let mut apps = Vec::new();
-        for si in inputs.iter().filter(|i| i.prop("application.id") != Some(APP_ID)) {
+        for si in inputs.iter().filter(|i| i.prop("application.id") != Some(STREAM_TAG)) {
             let key = si
                 .prop("application.process.binary")
                 .or(si.prop("application.name"))
@@ -591,7 +589,7 @@ impl Engine {
     }
 
     fn save_if_due(&mut self) {
-        if self.dirty_since.is_some_and(|t| t.elapsed() > Duration::from_secs(1)) {
+        if self.dirty_since.is_some_and(|t| t.elapsed() > Duration::from_millis(300)) {
             self.dirty_since = None;
             if let Err(e) = self.cfg.save() {
                 self.report(e);

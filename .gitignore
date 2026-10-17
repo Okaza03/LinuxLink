@@ -1,2 +1,5 @@
 target/
 __pycache__/
+.flatpak-builder/
+flatpak-build/
+flatpak-repo/

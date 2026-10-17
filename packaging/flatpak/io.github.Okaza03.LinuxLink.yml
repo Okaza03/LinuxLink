@@ -1,0 +1,64 @@
+# Flatpak manifest for LinuxLink.
+#
+# LinuxLink manages PipeWire for the whole session (virtual devices, default
+# output, routing apps), so it runs its audio tools (pactl, parec) on the host
+# via flatpak-spawn. That makes this Flatpak effectively unsandboxed.
+#
+# Build locally:
+#   flatpak-builder --user --install-deps-from=flathub --force-clean \
+#     --repo=target/flatpak-repo target/flatpak-build packaging/flatpak/io.github.Okaza03.LinuxLink.yml
+#   flatpak build-bundle target/flatpak-repo LinuxLink.flatpak io.github.Okaza03.LinuxLink
+
+id: io.github.Okaza03.LinuxLink
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: linuxlink
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # Update checks against GitHub releases.
+  - --share=network
+  # Run pactl/parec/bluetoothctl/xdg-open on the host.
+  - --talk-name=org.freedesktop.Flatpak
+  # Tray icon.
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # App icons and the list of installed apps.
+  - --filesystem=host-os:ro
+  - --filesystem=xdg-data/applications:ro
+  - --filesystem=xdg-data/icons:ro
+  - --filesystem=xdg-data/flatpak/exports/share:ro
+  - --filesystem=/var/lib/flatpak/exports/share:ro
+  - --filesystem=xdg-config/kdeglobals:ro
+  # "Start with your computer".
+  - --filesystem=xdg-config/autostart:create
+  # Downloaded updates.
+  - --filesystem=xdg-download
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+modules:
+  - name: linuxlink
+    buildsystem: simple
+    build-options:
+      # Crates are fetched during the build. A Flathub submission would vendor
+      # them with flatpak-cargo-generator instead.
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/linuxlink/cargo-home
+    build-commands:
+      - cargo build --release --locked -p linuxlink
+      - install -Dm755 target/release/linuxlink /app/bin/linuxlink
+      - install -Dm644 packaging/linux/io.github.Okaza03.LinuxLink.desktop /app/share/applications/io.github.Okaza03.LinuxLink.desktop
+      - install -Dm644 packaging/linux/io.github.Okaza03.LinuxLink.svg /app/share/icons/hicolor/scalable/apps/io.github.Okaza03.LinuxLink.svg
+      - install -Dm644 packaging/linux/io.github.Okaza03.LinuxLink.metainfo.xml /app/share/metainfo/io.github.Okaza03.LinuxLink.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - .git

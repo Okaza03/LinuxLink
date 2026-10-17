@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest an idea for LinuxLink
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: Describe what you're trying to achieve. A use case helps more than a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: How could LinuxLink help?
+      description: Your idea for how it could work, if you have one. Does Wave Link do it?
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, mock-ups, links.

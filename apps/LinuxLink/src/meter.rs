@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -24,11 +24,15 @@ impl Meter {
         let (p, s, c) = (peak.clone(), stop.clone(), child.clone());
         std::thread::spawn(move || {
             while !s.load(Ordering::Relaxed) {
-                let spawned = Command::new("parec")
+                let spawned = crate::sys::host_command("parec")
                     .args([
-                        "-d", &source,
-                        "--rate=8000", "--channels=1", "--format=float32le",
-                        "--latency-msec=30", "--raw",
+                        "-d",
+                        &source,
+                        "--rate=8000",
+                        "--channels=1",
+                        "--format=float32le",
+                        "--latency-msec=30",
+                        "--raw",
                         "--client-name=LinuxLink meter",
                         "--property=application.id=linuxlink",
                     ])
@@ -41,7 +45,9 @@ impl Meter {
                     let mut buf = [0u8; 1024];
                     while let Ok(n @ 1..) = out.read(&mut buf) {
                         let max = buf[..n - n % 4]
-                            .as_chunks::<4>().0.iter()
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
                             .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]).abs())
                             .fold(0.0f32, f32::max);
                         // Non-negative floats order the same as their bit patterns.

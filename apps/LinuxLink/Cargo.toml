@@ -1,9 +1,17 @@
 [package]
 name = "linuxlink"
-description = "A Wave Link style virtual audio mixer for Linux (PipeWire)"
+description = "A Wave Link style audio mixer for Linux (PipeWire)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["audio", "mixer", "pipewire", "streaming", "wave-link"]
+categories = ["multimedia::audio"]
+publish = false
 
 [dependencies]
 anyhow = "1.0.104"
@@ -12,6 +20,49 @@ dirs = "7.0.0"
 eframe = "0.37"
 egui_extras = { version = "0.37", features = ["svg", "image", "file"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.11.1"
 toml = "1.1.8"
+ureq = { version = "3", features = ["json"] }
+
+# `cargo deb --no-build`: Debian, Ubuntu, Mint, Pop!_OS...
+[package.metadata.deb]
+maintainer = "Okaza03 <58250719+Okaza03@users.noreply.github.com>"
+copyright = "2026, Okaza03 and LinuxLink contributors"
+license-file = ["../../LICENSE-MIT", "0"]
+extended-description = """\
+LinuxLink is an audio mixer modelled on Elgato Wave Link 3. Split apps into \
+channels, build independent mixes for your headphones and your stream, and \
+use every mix as a virtual microphone in OBS or Discord."""
+section = "sound"
+priority = "optional"
+depends = "$auto, pulseaudio-utils"
+recommends = "pipewire-pulse, wireplumber"
+suggests = "bluez"
+assets = [
+    ["target/release/linuxlink", "usr/bin/", "755"],
+    ["../../packaging/linux/io.github.Okaza03.LinuxLink.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/linux/io.github.Okaza03.LinuxLink.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../packaging/linux/io.github.Okaza03.LinuxLink.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["../../README.md", "usr/share/doc/linuxlink/", "644"],
+    ["../../CHANGELOG.md", "usr/share/doc/linuxlink/", "644"],
+]
+
+# `cargo generate-rpm`: Fedora, openSUSE, RHEL...
+[package.metadata.generate-rpm]
+license = "MIT OR Apache-2.0"
+summary = "A Wave Link style audio mixer for Linux (PipeWire)"
+assets = [
+    { source = "target/release/linuxlink", dest = "/usr/bin/linuxlink", mode = "755" },
+    { source = "../../packaging/linux/io.github.Okaza03.LinuxLink.desktop", dest = "/usr/share/applications/io.github.Okaza03.LinuxLink.desktop", mode = "644" },
+    { source = "../../packaging/linux/io.github.Okaza03.LinuxLink.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.Okaza03.LinuxLink.svg", mode = "644" },
+    { source = "../../packaging/linux/io.github.Okaza03.LinuxLink.metainfo.xml", dest = "/usr/share/metainfo/io.github.Okaza03.LinuxLink.metainfo.xml", mode = "644" },
+    { source = "../../LICENSE-MIT", dest = "/usr/share/licenses/linuxlink/LICENSE-MIT", mode = "644", doc = true },
+    { source = "../../LICENSE-APACHE", dest = "/usr/share/licenses/linuxlink/LICENSE-APACHE", mode = "644", doc = true },
+    { source = "../../README.md", dest = "/usr/share/doc/linuxlink/README.md", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+pulseaudio-utils = "*"

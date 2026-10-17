@@ -87,6 +87,10 @@ pub struct Config {
     pub hidden_outputs: BTreeSet<String>,
     /// Buffer size of every loopback, in milliseconds.
     pub latency_ms: u32,
+    /// Version whose "What's new" notes were last shown.
+    pub last_seen_version: Option<String>,
+    /// Closing the window minimizes instead of quitting, so audio keeps working.
+    pub close_to_tray: bool,
 }
 
 impl Default for Config {
@@ -139,16 +143,15 @@ impl Default for Config {
             hidden_inputs: BTreeSet::new(),
             hidden_outputs: BTreeSet::new(),
             latency_ms: 20,
+            last_seen_version: None,
+            close_to_tray: true,
         }
     }
 }
 
 impl Config {
     pub fn path() -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("linuxlink")
-            .join("config.toml")
+        dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join(crate::variant::CONFIG_DIR).join("config.toml")
     }
 
     pub fn load() -> Self {
@@ -174,7 +177,15 @@ impl Config {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(&path, toml::to_string_pretty(self)?)?;
+        // Write a temporary file and rename it over the real one, so a crash
+        // or power cut mid-save can never leave a half-written config behind.
+        let tmp = path.with_extension("toml.tmp");
+        {
+            let mut file = std::fs::File::create(&tmp)?;
+            std::io::Write::write_all(&mut file, toml::to_string_pretty(self)?.as_bytes())?;
+            file.sync_all()?;
+        }
+        std::fs::rename(&tmp, &path)?;
         Ok(())
     }
 
@@ -188,11 +199,8 @@ impl Config {
 
     /// Returns an id derived from `name` that no channel or mix uses yet.
     pub fn unique_id(&self, name: &str) -> String {
-        let base: String = name
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
+        let base: String =
+            name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         let base = if base.trim_matches('_').is_empty() { "item".to_string() } else { base };
         let taken = |id: &str| self.channel(id).is_some() || self.mix(id).is_some();
         let mut id = base.clone();
@@ -202,5 +210,47 @@ impl Config {
             n += 1;
         }
         id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Everything the user can change must survive a save and reload.
+    #[test]
+    fn every_setting_survives_save_and_load() {
+        let mut cfg = Config::default();
+        cfg.channels[1].level = Level::new(42, true);
+        cfg.channels[1].sends.insert("stream".into(), Level::new(13, true));
+        cfg.channels[2].sends.remove("my_mix");
+        cfg.channels[3].name = "Discord & Co".into();
+        cfg.channels[3].icon = "📞".into();
+        cfg.channels[0].kind = ChannelKind::Input { source: "alsa_input.usb-Mic".into() };
+        cfg.mixes[1].outputs = vec!["alsa_output.capture-card".into()];
+        cfg.mixes[1].level = Level::new(77, false);
+        cfg.mixes.push(MixCfg {
+            id: "rec".into(),
+            name: "Recording".into(),
+            icon: "⏺".into(),
+            outputs: vec![],
+            level: Level::new(60, true),
+        });
+        cfg.app_rules.insert("spotify".into(), "music".into());
+        cfg.app_rules.insert("com.discordapp.Discord".into(), "chat".into());
+        cfg.known_apps
+            .insert("spotify".into(), KnownApp { name: "Spotify".into(), icon: Some("spotify-client".into()) });
+        cfg.listen_output = Some("bluez_output.AA_BB.1".into());
+        cfg.listening = BTreeSet::from(["my_mix".to_string(), "rec".to_string()]);
+        cfg.hidden_inputs.insert("alsa_input.line-in".into());
+        cfg.hidden_outputs.insert("alsa_output.hdmi".into());
+        cfg.default_channel = Some("music".into());
+        cfg.latency_ms = 40;
+        cfg.last_seen_version = Some("0.1.0".into());
+        cfg.close_to_tray = false;
+
+        let text = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back, cfg);
     }
 }

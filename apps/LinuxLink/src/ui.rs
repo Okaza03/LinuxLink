@@ -10,13 +10,17 @@ use crate::engine::{
 };
 use crate::icons::IconCache;
 use crate::meter::MeterBank;
+use crate::updater::{InstallKind, Status, Updater};
+use crate::variant::{APP_ID, APP_NAME, REPO, TEST_BUILD, VERSION};
+use crate::whats_new::{self, Section};
+use crate::{sys, tray};
 use eframe::egui::{
-    self, pos2, vec2, Align, Align2, Color32, ComboBox, CornerRadius, FontId, Frame, Id, Layout, Margin, Mesh,
-    Rect, Response, RichText, ScrollArea, Sense, Shape, Stroke, Ui, UiBuilder,
+    self, pos2, vec2, Align, Align2, Color32, ComboBox, CornerRadius, FontId, Frame, Id, Layout, Margin, Mesh, Rect,
+    Response, RichText, ScrollArea, Sense, Shape, Stroke, Ui, UiBuilder,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const BG: Color32 = Color32::from_rgb(0x1c, 0x1c, 0x1c);
@@ -34,6 +38,9 @@ const TEXT: Color32 = Color32::from_rgb(0xec, 0xec, 0xec);
 const TEXT_DIM: Color32 = Color32::from_rgb(0x9a, 0x9a, 0x9a);
 const METER_LOW: Color32 = Color32::from_rgb(0x16, 0xc6, 0x0c);
 const METER_HIGH: Color32 = Color32::from_rgb(0xe3, 0xe0, 0x2a);
+const WHATS_NEW_WIDTH: f32 = 600.0;
+const UPDATE_BUTTON_SIZE: [f32; 2] = [300.0, 32.0];
+const TEST_BADGE: Color32 = Color32::from_rgb(0xff, 0x9f, 0x1c);
 
 const SIDEBAR_W: f32 = 220.0;
 const CH_W: f32 = 330.0;
@@ -68,10 +75,21 @@ pub struct LinuxLinkApp {
     source_edits: HashMap<String, (Level, Instant)>,
     /// Installed applications, loaded the first time a channel is opened.
     installed: Option<Vec<InstalledApp>>,
+    updater: Arc<Updater>,
+    /// Release notes to show in the "What's new" window; empty when closed.
+    whats_new: Vec<Section>,
+    /// Settings shared with `main`, so a window reopened from the tray
+    /// starts exactly where the last one left off.
+    shared: Arc<Mutex<Config>>,
 }
 
 impl LinuxLinkApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, cfg: Config, engine: Arc<EngineHandle>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        shared: Arc<Mutex<Config>>,
+        engine: Arc<EngineHandle>,
+        updater: Arc<Updater>,
+    ) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = BG;
@@ -81,6 +99,9 @@ impl LinuxLinkApp {
         visuals.selection.stroke = Stroke::new(1.0, ACCENT);
         visuals.hyperlink_color = ACCENT;
         cc.egui_ctx.set_visuals(visuals);
+        tray::set_window(Some(cc.egui_ctx.clone()));
+        let cfg = shared.lock().unwrap().clone();
+        let notes = whats_new::since(cfg.last_seen_version.as_deref());
         Self {
             cfg,
             engine,
@@ -91,6 +112,9 @@ impl LinuxLinkApp {
             dialog: None,
             source_edits: HashMap::new(),
             installed: None,
+            updater,
+            whats_new: notes,
+            shared,
         }
     }
 
@@ -111,6 +135,9 @@ impl LinuxLinkApp {
             ui.add_space(6.0);
             ui.label(RichText::new("〰").size(18.0).color(ACCENT));
             ui.label(RichText::new("LinuxLink").size(15.0).color(TEXT));
+            if TEST_BUILD {
+                ui.label(RichText::new(" TEST ").small().strong().color(Color32::BLACK).background_color(TEST_BADGE));
+            }
         });
         ui.add_space(16.0);
         section_label(ui, "Your devices");
@@ -129,6 +156,9 @@ impl LinuxLinkApp {
         }
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
             ui.add_space(4.0);
+            if nav_item(ui, "⏻", &format!("Quit {APP_NAME}"), false) {
+                tray::quit();
+            }
             if nav_item(ui, "⚙", "Settings", self.page == Page::Settings) {
                 self.page = Page::Settings;
             }
@@ -195,7 +225,8 @@ impl LinuxLinkApp {
                 let before = master.clone();
                 ui.horizontal(|ui| {
                     if channel_cell(ui, ch, &mut master, level, icons) {
-                        self.dialog = Some(Dialog::Channel { id: ch.id.clone(), name: ch.name.clone(), query: String::new() });
+                        self.dialog =
+                            Some(Dialog::Channel { id: ch.id.clone(), name: ch.name.clone(), query: String::new() });
                     }
                     for mix_id in &mix_ids {
                         send_cell(ui, ch, mix_id, level);
@@ -213,7 +244,8 @@ impl LinuxLinkApp {
             }
 
             if add_card(ui, vec2(CH_W, 48.0), "Create channel").clicked() {
-                self.dialog = Some(Dialog::NewChannel { name: String::new(), icon: CHANNEL_ICONS[0].into(), source: None });
+                self.dialog =
+                    Some(Dialog::NewChannel { name: String::new(), icon: CHANNEL_ICONS[0].into(), source: None });
             }
         });
     }
@@ -341,18 +373,23 @@ impl LinuxLinkApp {
                     self.listen_picker(ui, snap, "settings_listen", 280.0);
                 });
                 row_divider(ui);
-                settings_row(ui, "Mixes you hear", "Same as the 🎧 toggles on the Mixes page. Turn on as many as you like.", |ui| {
-                    for mix in self.cfg.mixes.iter().rev() {
-                        let mut on = self.cfg.listening.contains(&mix.id);
-                        if ui.checkbox(&mut on, &mix.name).changed() {
-                            if on {
-                                self.cfg.listening.insert(mix.id.clone());
-                            } else {
-                                self.cfg.listening.remove(&mix.id);
+                settings_row(
+                    ui,
+                    "Mixes you hear",
+                    "Same as the 🎧 toggles on the Mixes page. Turn on as many as you like.",
+                    |ui| {
+                        for mix in self.cfg.mixes.iter().rev() {
+                            let mut on = self.cfg.listening.contains(&mix.id);
+                            if ui.checkbox(&mut on, &mix.name).changed() {
+                                if on {
+                                    self.cfg.listening.insert(mix.id.clone());
+                                } else {
+                                    self.cfg.listening.remove(&mix.id);
+                                }
                             }
                         }
-                    }
-                });
+                    },
+                );
             });
 
             section(ui, "general", "⚙", "General", "Startup and default output", true, |ui| {
@@ -371,7 +408,16 @@ impl LinuxLinkApp {
                     });
                 });
                 row_divider(ui);
-                settings_row(ui, "Start with your computer", "Launch LinuxLink when you log in.", |ui| {
+                settings_row(
+                    ui,
+                    "Keep running when closed",
+                    "Closing the window keeps LinuxLink running in the system tray, so your audio keeps working.",
+                    |ui| {
+                        toggle(ui, &mut self.cfg.close_to_tray);
+                    },
+                );
+                row_divider(ui);
+                settings_row(ui, "Start with your computer", "Launch LinuxLink in the tray when you log in.", |ui| {
                     let mut on = autostart_path().is_some_and(|p| p.exists());
                     if toggle(ui, &mut on).changed() {
                         if let Err(e) = set_autostart(on) {
@@ -384,7 +430,11 @@ impl LinuxLinkApp {
             let hidden_in = snap.inputs.iter().filter(|d| self.cfg.hidden_inputs.contains(&d.name)).count();
             let summary = format!("{} on, {} off", snap.inputs.len() - hidden_in, hidden_in);
             section(ui, "inputs", "🎤", "Input devices", &summary, false, |ui| {
-                ui.label(RichText::new("Turned-off devices are hidden from LinuxLink. Other apps can still use them.").small().color(TEXT_DIM));
+                ui.label(
+                    RichText::new("Turned-off devices are hidden from LinuxLink. Other apps can still use them.")
+                        .small()
+                        .color(TEXT_DIM),
+                );
                 ui.add_space(4.0);
                 let used: Vec<String> = self
                     .cfg
@@ -407,7 +457,11 @@ impl LinuxLinkApp {
             let hidden_out = snap.outputs.iter().filter(|d| self.cfg.hidden_outputs.contains(&d.name)).count();
             let summary = format!("{} on, {} off", snap.outputs.len() - hidden_out, hidden_out);
             section(ui, "outputs", "🔊", "Output devices", &summary, false, |ui| {
-                ui.label(RichText::new("Turned-off devices are hidden from LinuxLink. Other apps can still use them.").small().color(TEXT_DIM));
+                ui.label(
+                    RichText::new("Turned-off devices are hidden from LinuxLink. Other apps can still use them.")
+                        .small()
+                        .color(TEXT_DIM),
+                );
                 ui.add_space(4.0);
                 for (i, d) in snap.outputs.iter().enumerate() {
                     if i > 0 {
@@ -443,7 +497,16 @@ impl LinuxLinkApp {
                 );
             });
 
-            section(ui, "about", "ℹ", "About", concat!("LinuxLink ", env!("CARGO_PKG_VERSION")), false, |ui| {
+            let about = format!("{APP_NAME} {VERSION}");
+            section(ui, "about", "ℹ", "About", &about, false, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("What's new").clicked() {
+                        self.whats_new = whats_new::sections().into_iter().filter(|s| s.version == VERSION).collect();
+                    }
+                    ui.hyperlink_to("Project page", format!("https://github.com/{REPO}"));
+                    ui.hyperlink_to("Report a problem", format!("https://github.com/{REPO}/issues/new/choose"));
+                });
+                ui.add_space(6.0);
                 ui.label(
                     RichText::new(
                         "Every mix is also a virtual microphone named “LinuxLink <mix name>”, \
@@ -455,6 +518,116 @@ impl LinuxLinkApp {
                 ui.label(RichText::new(format!("Settings file: {}", Config::path().display())).small().color(TEXT_DIM));
             });
         });
+    }
+
+    // ── Updates ────────────────────────────────────────────────────────────
+
+    /// The pill in the lower-right corner: update status and action.
+    fn update_button(&mut self, ctx: &egui::Context) {
+        let status = self.updater.status();
+        let manual = matches!(self.updater.kind, InstallKind::Arch | InstallKind::Other);
+        let (text, accent, enabled, tip) = match &status {
+            Status::Checking => ("⟳  Checking for updates…".to_string(), false, false, String::new()),
+            Status::UpToDate => (
+                "✔  Up to date".to_string(),
+                false,
+                true,
+                format!("{APP_NAME} {VERSION} is the newest version. Click to check again."),
+            ),
+            Status::Available { version } => (
+                format!("⬇  Download new update (v{version})"),
+                true,
+                true,
+                if TEST_BUILD {
+                    "This is a test build from source. Click to open the release page.".to_string()
+                } else if manual {
+                    "Opens the release page. Update with your package manager (pacman or your AUR helper).".to_string()
+                } else {
+                    "Downloads the update and opens it in your system's installer.".to_string()
+                },
+            ),
+            Status::Downloading { version, progress } => {
+                (format!("⬇  Downloading v{version}…  {:.0}%", progress * 100.0), false, false, String::new())
+            }
+            Status::ReadyToRestart { version } => (
+                format!("⟳  Restart to update to v{version}"),
+                true,
+                true,
+                "The update is installed. Click to restart LinuxLink now.".to_string(),
+            ),
+            Status::Downloaded { version, path } => (
+                format!("📦  Open the v{version} installer"),
+                false,
+                true,
+                format!("Downloaded to {}. Click to open it again.", path.display()),
+            ),
+            Status::Failed(err) => {
+                ("⚠  Update check failed".to_string(), false, true, format!("{err}\n\nClick to try again."))
+            }
+        };
+        egui::Area::new(Id::unique("linuxlink_update_button"))
+            .anchor(Align2::RIGHT_BOTTOM, vec2(-18.0, -14.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let label = RichText::new(text).color(if accent { BG } else { TEXT });
+                let button = egui::Button::new(label)
+                    .fill(if accent { ACCENT } else { CARD })
+                    .corner_radius(16.0)
+                    .min_size(vec2(0.0, 32.0));
+                // Fixed size, so the pill doesn't jump around as its text changes.
+                let mut resp = ui.add_enabled_ui(enabled, |ui| ui.add_sized(UPDATE_BUTTON_SIZE, button)).inner;
+                if !tip.is_empty() {
+                    resp = resp.on_hover_text(tip);
+                }
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    self.updater.press();
+                    if matches!(status, Status::ReadyToRestart { .. }) {
+                        tray::quit();
+                    }
+                }
+            });
+    }
+
+    fn whats_new_window(&mut self, ctx: &egui::Context) {
+        if self.whats_new.is_empty() {
+            return;
+        }
+        let mut close = false;
+        let modal = egui::Modal::new(Id::unique("linuxlink_whats_new")).show(ctx, |ui| {
+            ui.set_width(WHATS_NEW_WIDTH);
+            let title = match self.whats_new.as_slice() {
+                [only] => format!("What's new in {APP_NAME} {}", only.version),
+                _ => "What's new".to_string(),
+            };
+            ui.label(RichText::new(title).size(22.0).strong().color(TEXT));
+            ui.add_space(10.0);
+            ScrollArea::vertical().id_salt("whats_new").max_height(480.0).auto_shrink([false, true]).show(ui, |ui| {
+                let several = self.whats_new.len() > 1;
+                for section in &self.whats_new {
+                    if several {
+                        ui.label(RichText::new(format!("Version {}", section.version)).size(18.0).strong().color(TEXT));
+                    }
+                    if !section.date.is_empty() {
+                        ui.label(RichText::new(format!("Released {}", section.date)).small().color(TEXT_DIM));
+                    }
+                    markdown(ui, &section.body, WHATS_NEW_WIDTH - 24.0);
+                    ui.add_space(14.0);
+                }
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.hyperlink_to("Full release notes", format!("https://github.com/{REPO}/releases/tag/v{VERSION}"));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("  Got it  ").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+        if close || modal.should_close() {
+            self.whats_new.clear();
+            self.cfg.last_seen_version = Some(VERSION.to_string());
+        }
     }
 
     // ── Dialogs ────────────────────────────────────────────────────────────
@@ -476,7 +649,14 @@ impl LinuxLinkApp {
         }
     }
 
-    fn channel_dialog(&mut self, ui: &mut Ui, snap: &Snapshot, id: &str, name: &mut String, query: &mut String) -> bool {
+    fn channel_dialog(
+        &mut self,
+        ui: &mut Ui,
+        snap: &Snapshot,
+        id: &str,
+        name: &mut String,
+        query: &mut String,
+    ) -> bool {
         let Some(idx) = self.cfg.channels.iter().position(|c| c.id == id) else { return false };
         dialog_title(ui, "Channel");
         ui.label(RichText::new("Name").color(TEXT_DIM));
@@ -523,9 +703,8 @@ impl LinuxLinkApp {
     }
 
     fn app_assignments(&mut self, ui: &mut Ui, snap: &Snapshot, id: &str, query: &mut String) {
-        let search = ui.add(
-            egui::TextEdit::singleline(query).hint_text("🔍  Search applications").desired_width(f32::INFINITY),
-        );
+        let search =
+            ui.add(egui::TextEdit::singleline(query).hint_text("🔍  Search applications").desired_width(f32::INFINITY));
         if query.is_empty() && !search.has_focus() && ui.memory(|m| m.focused().is_none()) {
             search.request_focus();
         }
@@ -533,7 +712,8 @@ impl LinuxLinkApp {
 
         // Apps seen playing audio, plus installed apps matching the search.
         let q = query.trim().to_lowercase();
-        let matches = |name: &str, key: &str| q.is_empty() || name.to_lowercase().contains(&q) || key.to_lowercase().contains(&q);
+        let matches =
+            |name: &str, key: &str| q.is_empty() || name.to_lowercase().contains(&q) || key.to_lowercase().contains(&q);
         let mut rows: Vec<(String, KnownApp)> = self
             .cfg
             .known_apps
@@ -771,6 +951,16 @@ impl LinuxLinkApp {
 impl eframe::App for LinuxLinkApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Closing the window keeps LinuxLink running in the tray; main opens
+        // a new window when asked. Without a tray, minimize so it can't get lost.
+        if ctx.input(|i| i.viewport().close_requested()) && !tray::quitting() {
+            if !self.cfg.close_to_tray {
+                tray::set_quitting();
+            } else if !tray::available() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+        }
         let snap = self.engine.snapshot.lock().unwrap().clone();
         let before = self.cfg.clone();
         self.learn_apps(&snap);
@@ -805,11 +995,22 @@ impl eframe::App for LinuxLinkApp {
                 }
             });
         self.dialogs(&ctx, &view);
+        self.update_button(&ctx);
+        if self.dialog.is_none() {
+            self.whats_new_window(&ctx);
+        }
 
         if self.cfg != before {
             self.engine.send(Command::Apply(Box::new(self.cfg.clone())));
+            *self.shared.lock().unwrap() = self.cfg.clone();
         }
         ctx.request_repaint_after(Duration::from_millis(33));
+    }
+}
+
+impl Drop for LinuxLinkApp {
+    fn drop(&mut self) {
+        tray::set_window(None);
     }
 }
 
@@ -974,7 +1175,13 @@ fn mix_header(ui: &mut Ui, mix: &MixCfg, level: f32, listening: bool) -> (bool, 
     let painter = ui.painter_at(rect);
     let hovered = resp.hovered() && !listen.hovered();
     painter.rect_filled(rect, 6.0, if hovered { CARD_HOVER } else { CARD });
-    painter.text(rect.left_center() + vec2(16.0, -2.0), Align2::LEFT_CENTER, &mix.icon, FontId::proportional(22.0), TEXT);
+    painter.text(
+        rect.left_center() + vec2(16.0, -2.0),
+        Align2::LEFT_CENTER,
+        &mix.icon,
+        FontId::proportional(22.0),
+        TEXT,
+    );
     painter.text(rect.left_top() + vec2(54.0, 13.0), Align2::LEFT_TOP, &mix.name, FontId::proportional(15.0), TEXT);
     let n = mix.outputs.len();
     let sub = match n {
@@ -984,7 +1191,13 @@ fn mix_header(ui: &mut Ui, mix: &MixCfg, level: f32, listening: bool) -> (bool, 
     };
     painter.text(rect.left_top() + vec2(54.0, 33.0), Align2::LEFT_TOP, sub, FontId::proportional(13.0), TEXT_DIM);
     if mix.level.muted {
-        painter.text(btn.left_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, "🔇", FontId::proportional(14.0), MUTE_RED);
+        painter.text(
+            btn.left_center() - vec2(8.0, 0.0),
+            Align2::RIGHT_CENTER,
+            "🔇",
+            FontId::proportional(14.0),
+            MUTE_RED,
+        );
     }
 
     if listening {
@@ -999,11 +1212,18 @@ fn mix_header(ui: &mut Ui, mix: &MixCfg, level: f32, listening: bool) -> (bool, 
         painter.line_segment([btn.center() + vec2(-9.0, 9.0), btn.center() + vec2(9.0, -9.0)], Stroke::new(1.5, off));
     }
 
-    let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - 3.0), pos2(rect.left() + rect.width() * 0.66, rect.bottom()));
+    let bar = Rect::from_min_max(
+        pos2(rect.left(), rect.bottom() - 3.0),
+        pos2(rect.left() + rect.width() * 0.66, rect.bottom()),
+    );
     let gain = if mix.level.muted { 0.0 } else { (mix.level.volume as f32 / 100.0).powi(3) };
     paint_meter(&painter, bar, meter_frac(level * gain));
 
-    let tip = if listening { "Playing to you. Click to stop hearing this mix." } else { "Not playing to you. Click to hear this mix." };
+    let tip = if listening {
+        "Playing to you. Click to stop hearing this mix."
+    } else {
+        "Not playing to you. Click to hear this mix."
+    };
     let toggled = listen.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
     let clicked = resp.on_hover_text("Mix settings").on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
     (clicked && !toggled, toggled)
@@ -1098,20 +1318,16 @@ fn send_cell(ui: &mut Ui, ch: &mut ChannelCfg, mix_id: &str, level: f32) {
 }
 
 fn error_banner(ui: &mut Ui, err: &str, engine: &EngineHandle) {
-    Frame::new()
-        .fill(MUTED_BG)
-        .corner_radius(6.0)
-        .inner_margin(Margin::symmetric(12, 8))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("⚠  {err}")).color(TEXT));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("Dismiss").clicked() {
-                        engine.snapshot.lock().unwrap().errors.clear();
-                    }
-                });
+    Frame::new().fill(MUTED_BG).corner_radius(6.0).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("⚠  {err}")).color(TEXT));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.small_button("Dismiss").clicked() {
+                    engine.snapshot.lock().unwrap().errors.clear();
+                }
             });
         });
+    });
     ui.add_space(10.0);
 }
 
@@ -1250,7 +1466,7 @@ fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
 }
 
 fn autostart_path() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("autostart").join("linuxlink.desktop"))
+    Some(sys::host_config_dir()?.join("autostart").join(format!("{APP_ID}.desktop")))
 }
 
 fn set_autostart(on: bool) -> std::io::Result<()> {
@@ -1258,15 +1474,135 @@ fn set_autostart(on: bool) -> std::io::Result<()> {
     if !on {
         return std::fs::remove_file(path);
     }
-    let exe = std::env::current_exe()?;
+    let exec = if sys::in_flatpak() {
+        format!("flatpak run {APP_ID}")
+    } else if let Some(appimage) = std::env::var_os("APPIMAGE") {
+        format!("\"{}\"", appimage.to_string_lossy())
+    } else {
+        format!("\"{}\"", std::env::current_exe()?.display())
+    };
     std::fs::create_dir_all(path.parent().unwrap())?;
     std::fs::write(
         path,
         format!(
-            "[Desktop Entry]\nType=Application\nName=LinuxLink\nExec={}\nIcon=linuxlink\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
-            exe.display()
+            "[Desktop Entry]\nType=Application\nName={APP_NAME}\nExec={exec} --minimized\nIcon={APP_ID}\n\
+             Terminal=false\nX-GNOME-Autostart-enabled=true\n"
         ),
     )
+}
+
+/// Renders the small Markdown subset used in CHANGELOG.md: `###` headings,
+/// `-` bullets (with wrapped continuation lines), **bold**, `code`, links.
+fn markdown(ui: &mut Ui, text: &str, width: f32) {
+    let mut blocks: Vec<String> = Vec::new();
+    for line in text.lines() {
+        // Hard-wrapped lines continue the paragraph or bullet above them.
+        let starts_block = line.starts_with("- ") || line.starts_with('#');
+        let continues = !line.trim().is_empty() && !starts_block;
+        match blocks.last_mut() {
+            Some(last) if continues && !last.is_empty() => {
+                last.push(' ');
+                last.push_str(line.trim());
+            }
+            _ => blocks.push(line.trim().to_string()),
+        }
+    }
+    for block in blocks {
+        if block.is_empty() {
+            ui.add_space(4.0);
+        } else if let Some(heading) = block.strip_prefix("### ") {
+            ui.add_space(6.0);
+            ui.label(RichText::new(heading).size(16.0).strong().color(ACCENT));
+        } else if let Some(item) = block.strip_prefix("- ") {
+            ui.horizontal_top(|ui| {
+                ui.label(RichText::new("•").color(ACCENT));
+                wrapped(ui, inline_markdown(item), width - 16.0);
+            });
+        } else {
+            wrapped(ui, inline_markdown(&block), width);
+        }
+    }
+}
+
+/// A label wrapped at exactly `width` (a Label alone wraps at whatever space
+/// is available, which is unbounded inside a modal that sizes to its content).
+fn wrapped(ui: &mut Ui, job: egui::text::LayoutJob, width: f32) {
+    ui.allocate_ui_with_layout(vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
+        ui.set_max_width(width);
+        ui.label(job);
+    });
+}
+
+fn inline_markdown(text: &str) -> egui::text::LayoutJob {
+    use egui::text::{LayoutJob, TextFormat};
+    let mut job = LayoutJob::default();
+    let (mut bold, mut code) = (false, false);
+    let mut rest = text;
+    while !rest.is_empty() {
+        let (piece, skip) = if rest.starts_with("**") {
+            bold = !bold;
+            ("", 2)
+        } else if rest.starts_with('*') {
+            // *emphasis*: drop the markers.
+            ("", 1)
+        } else if rest.starts_with('`') {
+            code = !code;
+            ("", 1)
+        } else if let Some((label, after)) = rest.strip_prefix('[').and_then(|r| r.split_once("](")) {
+            // [label](url): keep the label.
+            let close = after.find(')').map_or(after.len(), |i| i + 1);
+            let consumed = 1 + label.len() + 2 + close;
+            (label, consumed)
+        } else {
+            let end = rest
+                .find(['*', '`', '['])
+                .filter(|&i| i > 0)
+                .unwrap_or_else(|| rest.chars().next().unwrap().len_utf8());
+            let end = if rest.find(['*', '`', '[']).is_none() { rest.len() } else { end };
+            (&rest[..end], end)
+        };
+        if !piece.is_empty() {
+            let font = if code { FontId::monospace(13.5) } else { FontId::proportional(14.5) };
+            let color = if bold { Color32::WHITE } else { Color32::from_gray(0xc8) };
+            job.append(piece, 0.0, TextFormat { font_id: font, color, ..Default::default() });
+        }
+        rest = &rest[skip.min(rest.len())..];
+    }
+    job
+}
+
+/// A small standalone window with a message, for problems before startup.
+pub fn show_notice(title: &str, message: &str) -> anyhow::Result<()> {
+    struct Notice(String);
+    impl eframe::App for Notice {
+        fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.add_space(6.0);
+                ui.label(RichText::new(&self.0).size(15.0));
+                ui.add_space(14.0);
+                if ui.button("  OK  ").clicked() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+        }
+    }
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title(format!("{APP_NAME}: {title}"))
+            .with_app_id(APP_ID)
+            .with_inner_size([440.0, 170.0])
+            .with_resizable(false),
+        ..Default::default()
+    };
+    eframe::run_native(
+        APP_NAME,
+        options,
+        Box::new(|cc| {
+            cc.egui_ctx.set_visuals(egui::Visuals::dark());
+            Ok(Box::new(Notice(message.to_string())))
+        }),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 #[cfg(test)]

@@ -18,8 +18,8 @@ pub fn installed() -> Vec<InstalledApp> {
         home.join(".local/share/applications"),
         home.join(".local/share/flatpak/exports/share/applications"),
         PathBuf::from("/var/lib/flatpak/exports/share/applications"),
-        PathBuf::from("/usr/local/share/applications"),
-        PathBuf::from("/usr/share/applications"),
+        crate::sys::host_path("/usr/local/share/applications"),
+        crate::sys::host_path("/usr/share/applications"),
     ];
     // Earlier directories override later ones, like the desktop does.
     let mut by_key: HashMap<String, InstalledApp> = HashMap::new();
@@ -60,11 +60,7 @@ fn parse(contents: &str) -> Option<InstalledApp> {
         Some(id) => id.to_string(),
         None => exec_binary(fields.get("Exec")?)?,
     };
-    Some(InstalledApp {
-        key,
-        name: fields.get("Name")?.to_string(),
-        icon: fields.get("Icon").map(|s| s.to_string()),
-    })
+    Some(InstalledApp { key, name: fields.get("Name")?.to_string(), icon: fields.get("Icon").map(|s| s.to_string()) })
 }
 
 /// Splits an `Exec=` line into words, keeping quoted paths with spaces whole.

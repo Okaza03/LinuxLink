@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Okaza03 and LinuxLink contributors -->
+<component type="desktop-application">
+  <id>io.github.Okaza03.LinuxLink</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>LinuxLink</name>
+  <summary>Mix and route your audio like Elgato Wave Link</summary>
+  <developer id="io.github.okaza03">
+    <name>Okaza03</name>
+  </developer>
+  <description>
+    <p>
+      LinuxLink is an audio mixer for Linux, modelled on Elgato Wave Link 3.
+      Split your apps into channels such as Music, Games and Voice Chat, then
+      build independent mixes from them: one for your headphones, another for
+      your stream or recording.
+    </p>
+    <ul>
+      <li>Routing matrix with a fader and mute for every channel in every mix</li>
+      <li>Assign apps to channels once and LinuxLink remembers them</li>
+      <li>Every mix is a virtual microphone for OBS, Discord and recorders</li>
+      <li>Listen to any number of mixes on your headphones</li>
+      <li>Live level meters, microphone gain and device management</li>
+      <li>Keeps running in the system tray, starts with your computer</li>
+    </ul>
+    <p>LinuxLink works with PipeWire (via pipewire-pulse).</p>
+  </description>
+  <launchable type="desktop-id">io.github.Okaza03.LinuxLink.desktop</launchable>
+  <provides>
+    <binary>linuxlink</binary>
+  </provides>
+  <url type="homepage">https://github.com/Okaza03/LinuxLink</url>
+  <url type="bugtracker">https://github.com/Okaza03/LinuxLink/issues</url>
+  <url type="vcs-browser">https://github.com/Okaza03/LinuxLink</url>
+  <url type="contribute">https://github.com/Okaza03/LinuxLink/blob/main/CONTRIBUTING.md</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Channels and mixes in the routing matrix</caption>
+      <image>https://raw.githubusercontent.com/Okaza03/LinuxLink/main/docs/images/mixes.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Settings</caption>
+      <image>https://raw.githubusercontent.com/Okaza03/LinuxLink/main/docs/images/settings.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Mixer</category>
+  </categories>
+  <keywords>
+    <keyword>mixer</keyword>
+    <keyword>pipewire</keyword>
+    <keyword>stream</keyword>
+    <keyword>wave link</keyword>
+  </keywords>
+  <branding>
+    <color type="primary" scheme_preference="light">#4cc2ff</color>
+    <color type="primary" scheme_preference="dark">#1b1f27</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">900</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-10-17">
+      <url type="details">https://github.com/Okaza03/LinuxLink/releases/tag/v0.1.0</url>
+      <description>
+        <p>The first release: routing matrix, app channels, up to five mixes with listen toggles, virtual microphones, device management, tray icon and automatic updates.</p>
+      </description>
+    </release>
+  </releases>
+</component>

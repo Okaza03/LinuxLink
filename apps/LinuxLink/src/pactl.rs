@@ -6,7 +6,6 @@
 use anyhow::{bail, Context, Result};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,16 +34,12 @@ impl SinkInput {
 }
 
 fn run(args: &[&str]) -> Result<String> {
-    let out = Command::new("pactl")
+    let out = crate::sys::host_command("pactl")
         .args(args)
         .output()
         .context("failed to run pactl (is pipewire-pulse / libpulse installed?)")?;
     if !out.status.success() {
-        bail!(
-            "pactl {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
+        bail!("pactl {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
@@ -56,9 +51,7 @@ fn list_json(kind: &str) -> Result<Vec<Value>> {
 
 /// pactl's JSON is inconsistent: some ids (e.g. `owner_module`) are strings.
 fn as_u32(v: Option<&Value>) -> Option<u32> {
-    v.and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
-        .filter(|&n| n < u32::MAX as u64)
-        .map(|n| n as u32)
+    v.and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok())).filter(|&n| n < u32::MAX as u64).map(|n| n as u32)
 }
 
 /// Volume of the first channel, in percent.
@@ -96,17 +89,11 @@ fn bluetooth_alias(addr: &str) -> Option<String> {
     if let Some(hit) = cache.get(addr) {
         return hit.clone();
     }
-    let alias = Command::new("bluetoothctl")
-        .args(["info", addr])
-        .output()
-        .ok()
-        .and_then(|out| {
-            let text = String::from_utf8_lossy(&out.stdout).into_owned();
-            let field = |key: &str| {
-                text.lines().find_map(|l| l.trim().strip_prefix(key)).map(|v| v.trim().to_string())
-            };
-            field("Alias:").or_else(|| field("Name:")).filter(|v| !v.is_empty())
-        });
+    let alias = crate::sys::host_command("bluetoothctl").args(["info", addr]).output().ok().and_then(|out| {
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let field = |key: &str| text.lines().find_map(|l| l.trim().strip_prefix(key)).map(|v| v.trim().to_string());
+        field("Alias:").or_else(|| field("Name:")).filter(|v| !v.is_empty())
+    });
     cache.insert(addr.to_string(), alias.clone());
     alias
 }
@@ -158,10 +145,7 @@ pub fn sink_inputs() -> Result<Vec<SinkInput>> {
 
 /// Formats a pulse proplist argument: `'k="v" k2="v2"'`.
 pub fn proplist(pairs: &[(&str, &str)]) -> String {
-    let body: Vec<String> = pairs
-        .iter()
-        .map(|(k, v)| format!("{k}=\"{}\"", v.replace(['"', '\''], "")))
-        .collect();
+    let body: Vec<String> = pairs.iter().map(|(k, v)| format!("{k}=\"{}\"", v.replace(['"', '\''], ""))).collect();
     format!("'{}'", body.join(" "))
 }
 
@@ -169,9 +153,7 @@ pub fn load_module(name: &str, args: &[String]) -> Result<u32> {
     let mut argv = vec!["load-module", name];
     argv.extend(args.iter().map(String::as_str));
     let out = run(&argv)?;
-    out.trim()
-        .parse()
-        .with_context(|| format!("unexpected load-module output: {out:?}"))
+    out.trim().parse().with_context(|| format!("unexpected load-module output: {out:?}"))
 }
 
 pub fn unload_module(id: u32) -> Result<()> {
@@ -192,7 +174,11 @@ pub fn modules() -> Result<Vec<(u32, String)>> {
 }
 
 fn bool_arg(b: bool) -> &'static str {
-    if b { "1" } else { "0" }
+    if b {
+        "1"
+    } else {
+        "0"
+    }
 }
 
 pub fn set_sink_input_volume(index: u32, percent: u32) -> Result<()> {

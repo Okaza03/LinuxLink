@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=LinuxLink
+GenericName=Audio Mixer
+Comment=Mix and route your audio like Elgato Wave Link
+Exec=linuxlink
+Icon=io.github.Okaza03.LinuxLink
+Terminal=false
+Categories=AudioVideo;Audio;Mixer;
+Keywords=audio;mixer;stream;obs;discord;pipewire;wave;link;microphone;
+StartupWMClass=io.github.Okaza03.LinuxLink
+SingleMainWindow=true

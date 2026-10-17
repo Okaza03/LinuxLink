@@ -1,12 +1,2 @@
 [alias]
 xtask = "run --package xtask --release --"
-
-# ffmpeg-sys-next builds FFmpeg with -march=native by default, which bakes the
-# build machine's CPU features (e.g. AVX-512 on CI runners) into release
-# binaries and crashes them with SIGILL elsewhere. Empty = baseline target;
-# FFmpeg still picks SIMD paths at runtime.
-[env]
-FFMPEG_MARCH = ""
-FFMPEG_MTUNE = ""
-# Linux builds FFmpeg from source and ignores this.
-FFMPEG_DIR = { value = "target/ffmpeg", relative = true, force = false }

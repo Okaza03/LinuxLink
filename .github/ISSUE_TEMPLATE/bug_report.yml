@@ -1,0 +1,64 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check [troubleshooting](https://github.com/Okaza03/LinuxLink/blob/main/docs/troubleshooting.md) and existing issues first.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Music channel
+        2. Tick Spotify
+        3. ...
+  - type: input
+    id: version
+    attributes:
+      label: LinuxLink version
+      description: Settings → About, or `linuxlink --version`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install LinuxLink?
+      options:
+        - AppImage
+        - Flatpak
+        - .deb package
+        - .rpm package
+        - Arch package / AUR
+        - Tarball (install.sh)
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop
+      placeholder: "Fedora 43, KDE Plasma 6 (Wayland)"
+    validations:
+      required: true
+  - type: textarea
+    id: audio
+    attributes:
+      label: Audio system
+      description: Output of `pactl info | head -12`.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Start LinuxLink from a terminal (`linuxlink`), reproduce the problem, and paste what it printed.
+      render: text

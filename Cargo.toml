@@ -3,9 +3,13 @@ resolver = "2"
 members = ["apps/LinuxLink", "xtask"]
 
 [workspace.package]
-version = "0.8.4"
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+authors = ["Okaza03 and LinuxLink contributors"]
+repository = "https://github.com/Okaza03/LinuxLink"
+homepage = "https://github.com/Okaza03/LinuxLink"
+rust-version = "1.95"
 
 [profile.release]
 lto = "thin"
