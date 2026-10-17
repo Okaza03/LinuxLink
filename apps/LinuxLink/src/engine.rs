@@ -146,6 +146,8 @@ struct Engine {
     bluetooth: Vec<String>,
     /// Counts refreshes, to check Bluetooth outputs every few of them.
     refreshes: u32,
+    /// Installed apps, to name the apps playing audio.
+    app_index: crate::apps::AppIndex,
     /// Volume and mute of each input device, as of the last refresh.
     input_levels: HashMap<String, (u32, bool)>,
     /// Until when input volumes are protected after LinuxLink added or
@@ -222,6 +224,8 @@ pub fn prepare(cfg: &mut Config) -> Result<Defaults> {
         // (older configs listed it as a plain output of My Mix).
         mix.outputs.retain(|o| !o.is_empty() && Some(o) != cfg.listen_output.as_ref());
     }
+
+    crate::apps::tidy_known_apps(cfg, &crate::apps::AppIndex::load());
 
     let sources = pactl::sources()?;
     let def_src = pactl::default_source()
@@ -619,6 +623,10 @@ impl Engine {
         if self.refreshes.is_multiple_of(4) {
             self.heal_bluetooth();
         }
+        // Pick up apps installed while LinuxLink runs, about once a minute.
+        if self.refreshes.is_multiple_of(120) {
+            self.app_index = crate::apps::AppIndex::load();
+        }
         // You picked another output (e.g. in the volume applet) while
         // LinuxLink owns the default: listen there, and route apps through
         // LinuxLink again.
@@ -683,14 +691,15 @@ impl Engine {
         self.seen_streams.retain(|i| live.contains(i));
 
         let mut apps = Vec::new();
-        for si in inputs.iter().filter(|i| i.prop("application.id") != Some(STREAM_TAG)) {
-            let key = si
-                .prop("application.process.binary")
-                .or(si.prop("application.name"))
-                .or(si.prop("media.name"))
-                .unwrap_or("unknown")
-                .to_string();
-            let name = si.prop("application.name").unwrap_or(&key).to_string();
+        // Streams created by modules (loopbacks from other tools) aren't apps.
+        for si in inputs.iter().filter(|i| i.prop("application.id") != Some(STREAM_TAG) && i.owner_module.is_none()) {
+            let who = self.app_index.identify(&crate::apps::StreamInfo {
+                binary: si.prop("application.process.binary"),
+                app_name: si.prop("application.name"),
+                icon: si.prop("application.icon_name"),
+                flatpak_id: si.prop("pipewire.access.portal.app_id").or(si.prop("application.flatpak.id")),
+            });
+            let (key, name, icon) = (who.key, who.name, who.icon);
             let mut ids: Vec<String> = [
                 "application.process.binary",
                 "application.name",
@@ -700,8 +709,8 @@ impl Engine {
             .iter()
             .filter_map(|p| si.prop(p).map(str::to_lowercase))
             .collect();
+            ids.push(key.to_lowercase());
             ids.dedup();
-            let icon = si.prop("application.icon_name").or(si.prop("application.process.binary")).map(String::from);
             let mut sink = sink_names.get(&si.sink).unwrap_or(&"").to_string();
 
             if self.seen_streams.insert(si.index) {
@@ -894,6 +903,7 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
         node_ids: HashMap::new(),
         bluetooth: Vec::new(),
         refreshes: 0,
+        app_index: crate::apps::AppIndex::load(),
         input_levels: HashMap::new(),
         guard_until: None,
         listen_switches: 0,

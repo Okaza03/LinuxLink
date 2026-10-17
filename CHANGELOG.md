@@ -9,6 +9,20 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Apps show their real name and icon.** LinuxLink now matches every app
+  playing audio to its menu entry, instead of trusting the audio stream's own
+  name: Discord no longer shows as "WEBRTC VoiceEngine", Steam as "Chromium",
+  or your desktop's notification sounds as "libcanberra" or a blank entry
+  (they're now **System sounds**).
+- **Games appear once, with their Steam name and icon**: "deadlock.exe"
+  becomes **Deadlock**, and a game no longer shows up twice (with and without
+  ".exe") when both Steam and Proton/Wine play its audio.
+- The list of apps tidies itself once: names and icons are corrected, and
+  leftovers from other audio tools are removed. Apps you assigned to a
+  channel stay assigned.
+
 ## [0.1.2] - 2026-10-17
 
 Bluetooth headsets now just work, and the microphone volume stays put.
