@@ -9,6 +9,10 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-17
+
+Apps show their real names and icons, and the documentation grew a lot.
+
 ### Fixed
 
 - **Apps show their real name and icon.** LinuxLink now matches every app
@@ -22,6 +26,16 @@ update, and as the notes of the matching GitHub release.
 - The list of apps tidies itself once: names and icons are corrected, and
   leftovers from other audio tools are removed. Apps you assigned to a
   channel stay assigned.
+
+### Documentation
+
+- New guides: [installing, updating and removing](https://github.com/Okaza03/LinuxLink/blob/main/docs/installing.md)
+  for every package format, [setups](https://github.com/Okaza03/LinuxLink/blob/main/docs/setups.md)
+  with step-by-step recipes for OBS, Discord, recording and more, an
+  [FAQ](https://github.com/Okaza03/LinuxLink/blob/main/docs/faq.md) and a
+  [configuration reference](https://github.com/Okaza03/LinuxLink/blob/main/docs/configuration.md).
+- The user guide explains how apps are recognized, Bluetooth headsets, and
+  every mouse and keyboard action.
 
 ## [0.1.2] - 2026-10-17
 
@@ -160,7 +174,8 @@ built on PipeWire.
   Flatpak, .deb (Debian, Ubuntu, Mint, Pop!_OS), .rpm (Fedora, openSUSE), an
   Arch Linux package, and a plain tarball.
 
-[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/Okaza03/LinuxLink/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Okaza03/LinuxLink/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Okaza03/LinuxLink/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Okaza03/LinuxLink/releases/tag/v0.1.0
