@@ -1,0 +1,17 @@
+[package]
+name = "linuxlink"
+description = "A Wave Link style virtual audio mixer for Linux (PipeWire)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+ctrlc = { version = "3.5.2", features = ["termination"] }
+dirs = "7.0.0"
+eframe = "0.37"
+egui_extras = { version = "0.37", features = ["svg", "image", "file"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.1.8"
