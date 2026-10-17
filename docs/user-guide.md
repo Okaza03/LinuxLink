@@ -55,7 +55,9 @@ Any number of mixes can be on at once. Choose your **listening device**
 (headphones or speakers) in the top-right corner. You can also just pick an
 output in your desktop's volume controls: LinuxLink follows, moving your mixes
 there while apps keep playing through your channels. If the listening device
-is disconnected, LinuxLink plays on the system's output until it's back.
+is disconnected, LinuxLink switches to the most recently connected Bluetooth
+headset, else your previous output. A Bluetooth headset you connect becomes
+your listening device automatically.
 
 ### The cells
 

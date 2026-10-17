@@ -1638,7 +1638,7 @@ mod tests {
     use crate::pactl::Device;
 
     fn dev(name: &str) -> Device {
-        Device { index: 0, name: name.into(), description: name.into(), volume: None, muted: false }
+        Device { index: 0, name: name.into(), description: name.into(), volume: None, muted: false, node_id: None }
     }
 
     #[test]

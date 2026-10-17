@@ -9,6 +9,21 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Bluetooth headsets just work.** A headset you connect becomes your
+  listening device automatically, like on a phone. If it disconnects,
+  LinuxLink carries on with the most recently connected headset, else your
+  previous output, else any other output, instead of going silent.
+- **No more silence after a Bluetooth hiccup.** Bluetooth outputs sometimes
+  fail when audio starts ("Failure in Bluetooth audio transport") and then
+  stay silent; LinuxLink now notices and reconnects them by itself.
+- LinuxLink now rebuilds its connection to a device that went away and came
+  back, instead of staying silent until you picked another device and back.
+- LinuxLink no longer switches your listening device at startup just because
+  the system's default output was different (this picked the wrong device,
+  e.g. the headphone jack instead of your AirPods, after logging in).
+
 ## [0.1.1] - 2026-10-17
 
 Fixes for sound, the microphone volume and the AppImage.

@@ -15,6 +15,8 @@ pub struct Device {
     pub description: String,
     pub volume: Option<u32>,
     pub muted: bool,
+    /// PipeWire's id for the device's node.
+    pub node_id: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +116,7 @@ fn devices(kind: &str) -> Result<Vec<Device>> {
                 description,
                 volume: volume_percent(d),
                 muted: muted(d),
+                node_id: as_u32(d.pointer("/properties/object.id")),
             })
         })
         .collect())
@@ -207,6 +210,10 @@ pub fn default_sink() -> Result<String> {
 
 pub fn default_source() -> Result<String> {
     Ok(run(&["get-default-source"])?.trim().to_string())
+}
+
+pub fn suspend_sink(sink: &str, suspend: bool) -> Result<()> {
+    run(&["suspend-sink", sink, bool_arg(suspend)]).map(drop)
 }
 
 pub fn set_default_sink(sink: &str) -> Result<()> {

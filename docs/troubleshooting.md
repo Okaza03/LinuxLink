@@ -59,6 +59,12 @@ linuxlink --cleanup
 Only one LinuxLink (or LinuxLink Test) can run at a time, because they control
 the same devices. Look for it in the taskbar or tray, or quit it there first.
 
+## LinuxLink has no icon in the taskbar (AppImage)
+
+The AppImage adds itself to your app menu when it starts. If you ran an older
+AppImage before that, your desktop may have remembered "no icon" for
+LinuxLink: log out and back in once.
+
 ## No tray icon
 
 Your desktop needs StatusNotifierItem support. KDE Plasma, Cinnamon, XFCE and

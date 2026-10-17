@@ -133,12 +133,23 @@ struct Engine {
     needs_sync: bool,
     /// Hardware outputs seen in the last refresh.
     known_sinks: HashSet<String>,
+    /// Their PipeWire node ids.
+    node_ids: HashMap<String, u32>,
+    /// Connected Bluetooth outputs, oldest connection first.
+    bluetooth: Vec<String>,
+    /// Counts refreshes, to check Bluetooth outputs every few of them.
+    refreshes: u32,
     /// Volume and mute of each input device, as of the last refresh.
     input_levels: HashMap<String, (u32, bool)>,
     /// Until when input volumes are protected after LinuxLink added or
     /// removed devices (see `guard_inputs`).
     guard_until: Option<Instant>,
     listen_switches: u64,
+}
+
+/// Whether `pw-cli info` output describes a node in the error state.
+fn node_failed(info: &str) -> bool {
+    info.lines().any(|l| l.trim_start_matches(['*', ' ', '\t']).starts_with("state:") && l.contains("\"error\""))
 }
 
 /// Removes modules left behind by a previous run that didn't exit cleanly.
@@ -154,6 +165,10 @@ pub fn cleanup_stale() {
 
 fn is_ours(name: &str) -> bool {
     name.starts_with(PREFIX)
+}
+
+fn is_bluetooth(sink: &str) -> bool {
+    sink.starts_with("bluez_output.")
 }
 
 fn is_hardware_source(name: &str) -> bool {
@@ -184,10 +199,11 @@ pub fn prepare(cfg: &mut Config) -> Result<Defaults> {
             .cloned();
         cfg.listen_output = heard.or_else(|| (!prev.is_empty()).then(|| prev.clone()));
     }
-    // The system output changed while LinuxLink was closed (or this is the
-    // first start with this setting): listen where the system plays now.
-    if !prev.is_empty() && cfg.last_system_output.as_ref() != Some(&prev) {
-        cfg.listen_output = Some(prev.clone());
+    // Your listening device isn't connected: use a connected Bluetooth
+    // headset if there is one, else the system's output.
+    if cfg.listen_output.as_ref().is_some_and(|o| !sinks.iter().any(|s| &s.name == o)) {
+        let bluetooth = sinks.iter().find(|s| is_bluetooth(&s.name)).map(|s| s.name.clone());
+        cfg.listen_output = bluetooth.or_else(|| (!prev.is_empty()).then(|| prev.clone()));
     }
     for mix in &mut cfg.mixes {
         for out in &mut mix.outputs {
@@ -481,10 +497,64 @@ impl Engine {
     /// system's previous output while that device is disconnected.
     fn listen_target(&self) -> Option<String> {
         let wanted = self.cfg.listen_output.clone()?;
-        if self.known_sinks.is_empty() || self.known_sinks.contains(&wanted) || self.prev_default.is_empty() {
-            Some(wanted)
-        } else {
-            Some(self.prev_default.clone())
+        if self.known_sinks.is_empty() || self.known_sinks.contains(&wanted) {
+            return Some(wanted);
+        }
+        self.fallback_output().or(Some(wanted))
+    }
+
+    /// Where to play when your listening device is gone: the most recently
+    /// connected Bluetooth headset, else the system's previous output, else
+    /// any other output (preferring anything over HDMI/S/PDIF).
+    fn fallback_output(&self) -> Option<String> {
+        let wanted = self.cfg.listen_output.as_ref();
+        let usable = |n: &&String| self.known_sinks.contains(*n) && Some(*n) != wanted;
+        let bluetooth = self.bluetooth.iter().rev().find(usable).cloned();
+        let previous = Some(&self.prev_default).filter(usable).cloned();
+        let any = || {
+            let mut others: Vec<&String> = self.known_sinks.iter().filter(usable).collect();
+            others.sort_by_key(|n| (n.contains("hdmi") || n.contains("SPDIF"), n.to_string()));
+            others.first().map(|n| n.to_string())
+        };
+        bluetooth.or(previous).or_else(any)
+    }
+
+    fn switch_listening(&mut self, output: String) {
+        if self.cfg.listen_output.as_ref() != Some(&output) {
+            self.cfg.listen_output = Some(output);
+            self.listen_switches += 1;
+            self.dirty_since.get_or_insert_with(Instant::now);
+            self.needs_sync = true;
+        }
+    }
+
+    /// Bluetooth outputs sometimes fail when streams start or stop ("Failure
+    /// in Bluetooth audio transport") and then stay silent in an error state
+    /// until something reconnects to them. Reconnect the ones LinuxLink feeds.
+    fn heal_bluetooth(&mut self) {
+        let fed: HashSet<String> = self
+            .mixes
+            .values()
+            .flat_map(|rt| rt.outputs.iter().filter(|(_, l)| l.module.is_some()).map(|(n, _)| n.clone()))
+            .filter(|n| is_bluetooth(n))
+            .collect();
+        for name in fed {
+            let Some(id) = self.node_ids.get(&name) else { continue };
+            let Ok(out) = crate::sys::host_command("pw-cli").args(["info", &id.to_string()]).output() else { continue };
+            if !node_failed(&String::from_utf8_lossy(&out.stdout)) {
+                continue;
+            }
+            eprintln!("linuxlink: {name} stopped working; reconnecting");
+            for rt in self.mixes.values_mut() {
+                if let Some(l) = rt.outputs.remove(&name) {
+                    l.unload();
+                }
+            }
+            // Suspending the device clears its error state.
+            let _ = pactl::suspend_sink(&name, true);
+            std::thread::sleep(Duration::from_millis(300));
+            let _ = pactl::suspend_sink(&name, false);
+            self.needs_sync = true;
         }
     }
 
@@ -496,10 +566,42 @@ impl Engine {
         // Follow the listening device as outputs come and go.
         self.guard_inputs(&sources);
         let hardware: HashSet<String> = sinks.iter().filter(|s| !is_ours(&s.name)).map(|s| s.name.clone()).collect();
+        self.node_ids = sinks.iter().filter_map(|s| Some((s.name.clone(), s.node_id?))).collect();
         if hardware != self.known_sinks {
             let before = self.listen_target();
+            let first_look = self.known_sinks.is_empty();
+            let connected: Vec<String> =
+                hardware.iter().filter(|n| is_bluetooth(n) && !self.known_sinks.contains(*n)).cloned().collect();
+            self.bluetooth.retain(|n| hardware.contains(n));
+            self.bluetooth.extend(connected.iter().cloned());
             self.known_sinks = hardware;
+            if let Some(headset) = connected.last().filter(|_| !first_look) {
+                // A Bluetooth headset that just connected is what you want to hear.
+                self.switch_listening(headset.clone());
+            } else if self.cfg.listen_output.as_ref().is_some_and(|o| !self.known_sinks.contains(o)) {
+                // Your listening device went away: carry on with the next best.
+                if let Some(next) = self.fallback_output() {
+                    self.switch_listening(next);
+                }
+            }
             self.needs_sync |= self.listen_target() != before;
+        }
+        // PipeWire removes a loopback when its device disappears; rebuild
+        // any that are gone.
+        if let Ok(modules) = pactl::modules() {
+            let loaded: HashSet<u32> = modules.iter().map(|(id, _)| *id).collect();
+            let dead = |l: &Loop| l.module.is_some_and(|m| !loaded.contains(&m));
+            let before = self.sends.len() + self.mixes.values().map(|rt| rt.outputs.len()).sum::<usize>();
+            self.sends.retain(|_, l| !dead(l));
+            for rt in self.mixes.values_mut() {
+                rt.outputs.retain(|_, l| !dead(l));
+            }
+            let after = self.sends.len() + self.mixes.values().map(|rt| rt.outputs.len()).sum::<usize>();
+            self.needs_sync |= after != before;
+        }
+        self.refreshes = self.refreshes.wrapping_add(1);
+        if self.refreshes.is_multiple_of(4) {
+            self.heal_bluetooth();
         }
         // You picked another output (e.g. in the volume applet) while
         // LinuxLink owns the default: listen there, and route apps through
@@ -687,7 +789,6 @@ impl Engine {
         let target = self.listen_target().filter(|t| !t.is_empty()).unwrap_or_else(|| self.prev_default.clone());
         if !target.is_empty() {
             let _ = pactl::set_default_sink(&target);
-            self.cfg.last_system_output = Some(target);
         }
 
         // Taking LinuxLink's devices away makes some apps (Discord's voice
@@ -768,6 +869,9 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
         sends: HashMap::new(),
         applied_default: None,
         known_sinks: HashSet::new(),
+        node_ids: HashMap::new(),
+        bluetooth: Vec::new(),
+        refreshes: 0,
         input_levels: HashMap::new(),
         guard_until: None,
         listen_switches: 0,
@@ -842,4 +946,18 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
         .expect("spawning engine thread");
 
     Arc::new(EngineHandle { tx, snapshot, join: Mutex::new(Some(join)) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::node_failed;
+
+    #[test]
+    fn spots_failed_nodes_in_pw_cli_output() {
+        let failed = "\tid: 566\n*\tstate: \"error\"\n*\terror: \"Received error event\"\n";
+        let fine = "\tid: 566\n*\tstate: \"running\"\n*\tmax-input-ports: 0\n";
+        assert!(node_failed(failed));
+        assert!(!node_failed(fine));
+        assert!(!node_failed("\tmedia.name = \"state: error\"\n"));
+    }
 }
