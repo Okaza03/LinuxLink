@@ -6,10 +6,13 @@
 //!  mic ────────────────────send──▶ (any mix)
 //! ```
 //!
-//! Every send is one loopback stream whose volume is `channel master × send`,
-//! so mixes are fully independent, like Wave Link's routing matrix.
+//! Every send is one loopback stream whose gain is channel master + send
+//! fader + boost − ducking (in dB, see `levels`), so mixes are fully
+//! independent, like Wave Link's routing matrix.
 
 use crate::config::{ChannelCfg, ChannelKind, Config, Level, MixCfg, DEFAULT_OUTPUT};
+use crate::levels::{self, Ducker, RAW_NORM};
+use crate::meter::Probe;
 use crate::pactl::{self, proplist, Device};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -49,13 +52,40 @@ pub fn mix_capture(id: &str) -> String {
     format!("{}.monitor", mix_sink(id))
 }
 
-/// Volume and mute actually applied to a send. For app channels that is
-/// channel master × send fader; an input channel's master is the hardware
-/// device's own volume, which already shapes what the send captures.
-pub fn effective(ch: &ChannelCfg, send: &Level) -> Level {
-    match ch.kind {
-        ChannelKind::Virtual => Level::new(ch.level.volume * send.volume / 100, ch.level.muted || send.muted),
-        ChannelKind::Input { .. } => send.clone(),
+/// Gain of a send in dB (`None` is silence): channel master + send fader +
+/// boost − `duck_db`. An input channel's master is the hardware device's own
+/// volume, which already shapes what the send captures.
+pub fn send_db(ch: &ChannelCfg, send: &Level, duck_db: f32) -> Option<f32> {
+    let master = match ch.kind {
+        ChannelKind::Virtual => levels::fader_db(ch.level.volume),
+        ChannelKind::Input { .. } => Some(0.0),
+    };
+    levels::sum_db([master, levels::fader_db(send.volume), Some(ch.boost.gain_db() - duck_db)])
+}
+
+pub fn send_muted(ch: &ChannelCfg, send: &Level) -> bool {
+    send.muted || (ch.kind == ChannelKind::Virtual && ch.level.muted)
+}
+
+/// What a stream or sink is set to: a raw pulse volume and its mute.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Gain {
+    raw: u32,
+    muted: bool,
+}
+
+impl Gain {
+    fn send(ch: &ChannelCfg, send: &Level, duck_db: f32) -> Self {
+        Self { raw: levels::raw_volume(send_db(ch, send, duck_db)), muted: send_muted(ch, send) }
+    }
+
+    fn fader(level: &Level) -> Self {
+        Self { raw: levels::raw_volume(levels::fader_db(level.volume)), muted: level.muted }
+    }
+
+    /// Whether PipeWire reports something else (more than 1% off).
+    fn drifted(applied: &Option<Self>, raw: Option<u32>, muted: bool) -> bool {
+        applied.as_ref().is_some_and(|a| a.muted != muted || raw.is_some_and(|r| r.abs_diff(a.raw) > RAW_NORM / 100))
     }
 }
 
@@ -91,6 +121,8 @@ pub struct Snapshot {
     /// (when you picked another output in the system's volume controls).
     pub listen_output: Option<String>,
     pub listen_switches: u64,
+    /// How far ducked channels are lowered right now, in dB.
+    pub ducking_db: f32,
 }
 
 /// A loopback module. `module` is `None` when loading failed (device
@@ -98,7 +130,7 @@ pub struct Snapshot {
 struct Loop {
     module: Option<u32>,
     sink_input: Option<u32>,
-    applied: Option<Level>,
+    applied: Option<Gain>,
 }
 
 impl Loop {
@@ -119,7 +151,7 @@ struct MixRt {
     name: String,
     modules: Vec<u32>,
     outputs: HashMap<String, Loop>,
-    applied: Option<Level>,
+    applied: Option<Gain>,
 }
 
 struct Engine {
@@ -146,6 +178,9 @@ struct Engine {
     bluetooth: Vec<String>,
     /// Counts refreshes, to check Bluetooth outputs every few of them.
     refreshes: u32,
+    /// Fed Bluetooth outputs found not running, and on how many checks in a row.
+    bt_stalls: HashMap<String, u32>,
+    bt_reconnects: HashMap<String, Reconnect>,
     /// Installed apps, to name the apps playing audio.
     app_index: crate::apps::AppIndex,
     /// Volume and mute of each input device, as of the last refresh.
@@ -154,11 +189,27 @@ struct Engine {
     /// removed devices (see `guard_inputs`).
     guard_until: Option<Instant>,
     listen_switches: u64,
+    /// Voice ducking: level probes on the key channels, keyed by source.
+    duck_probes: HashMap<String, Probe>,
+    ducker: Ducker,
+    /// Current reduction, in dB.
+    duck_db: f32,
+    last_duck: Instant,
 }
 
-/// Whether `pw-cli info` output describes a node in the error state.
-fn node_failed(info: &str) -> bool {
-    info.lines().any(|l| l.trim_start_matches(['*', ' ', '\t']).starts_with("state:") && l.contains("\"error\""))
+/// The node state in `pw-cli info` output: "running", "idle", "error"...
+fn node_state(info: &str) -> Option<&str> {
+    info.lines().find_map(|l| {
+        l.trim_start_matches(['*', ' ', '\t']).strip_prefix("state:")?.trim().strip_prefix('"')?.split('"').next()
+    })
+}
+
+/// A Bluetooth output LinuxLink had to reconnect, and when it may try again.
+struct Reconnect {
+    not_before: Instant,
+    attempts: u32,
+    /// Still waiting to reconnect (the loopback is down until then).
+    waiting: bool,
 }
 
 /// Removes modules left behind by a previous run that didn't exit cleanly.
@@ -395,7 +446,10 @@ impl Engine {
                 rt.outputs.remove(&o).unwrap().unload();
                 changed = true;
             }
-            let missing: Vec<&String> = outputs.iter().filter(|o| !rt.outputs.contains_key(*o)).collect();
+            let now = Instant::now();
+            let cooling = |o: &String| self.bt_reconnects.get(o).is_some_and(|r| r.waiting && now < r.not_before);
+            let missing: Vec<&String> =
+                outputs.iter().filter(|o| !rt.outputs.contains_key(*o) && !cooling(o)).collect();
             for out in missing {
                 let l = self.try_loop(&mix_capture(&mix.id), out, &format!("LinuxLink {} output", mix.name));
                 self.mixes.get_mut(&mix.id).unwrap().outputs.insert(out.clone(), l);
@@ -540,8 +594,12 @@ impl Engine {
     }
 
     /// Bluetooth outputs sometimes fail when streams start or stop ("Failure
-    /// in Bluetooth audio transport") and then stay silent in an error state
-    /// until something reconnects to them. Reconnect the ones LinuxLink feeds.
+    /// in Bluetooth audio transport"), most often right as LinuxLink starts.
+    /// Afterwards they either sit in the error state or quietly stop running,
+    /// and stay silent until something reconnects to them. A device LinuxLink
+    /// feeds should always be running, so reconnect any that isn't: drop the
+    /// loopback, give the headset a moment to restart, then connect again
+    /// (backing off if it keeps failing).
     fn heal_bluetooth(&mut self) {
         let fed: HashSet<String> = self
             .mixes
@@ -549,23 +607,63 @@ impl Engine {
             .flat_map(|rt| rt.outputs.iter().filter(|(_, l)| l.module.is_some()).map(|(n, _)| n.clone()))
             .filter(|n| is_bluetooth(n))
             .collect();
+        self.bt_stalls.retain(|n, _| fed.contains(n));
+        let now = Instant::now();
         for name in fed {
             let Some(id) = self.node_ids.get(&name) else { continue };
             let Ok(out) = crate::sys::host_command("pw-cli").args(["info", &id.to_string()]).output() else { continue };
-            if !node_failed(&String::from_utf8_lossy(&out.stdout)) {
+            let info = String::from_utf8_lossy(&out.stdout);
+            let state = node_state(&info).unwrap_or("unknown").to_string();
+            let failed = state == "error";
+            let stalled = matches!(state.as_str(), "idle" | "suspended");
+            if !failed && !stalled {
+                self.bt_stalls.remove(&name);
+                // Healthy for a while: forget earlier failures.
+                if self.bt_reconnects.get(&name).is_some_and(|r| now > r.not_before + Duration::from_secs(30)) {
+                    self.bt_reconnects.remove(&name);
+                }
                 continue;
             }
-            eprintln!("linuxlink: {name} stopped working; reconnecting");
+            // Idle or suspended can be a moment of transition; act on the second look.
+            let looks = self.bt_stalls.entry(name.clone()).or_insert(0);
+            *looks += 1;
+            if stalled && *looks < 2 {
+                continue;
+            }
+            self.bt_stalls.remove(&name);
+            let r = self.bt_reconnects.entry(name.clone()).or_insert(Reconnect {
+                not_before: now,
+                attempts: 0,
+                waiting: false,
+            });
+            r.attempts += 1;
+            let delay = Duration::from_secs(1 << (r.attempts - 1).min(3));
+            r.not_before = now + delay;
+            r.waiting = true;
+            eprintln!(
+                "linuxlink: {name} is {state} instead of playing; reconnecting in {}s (attempt {})",
+                delay.as_secs(),
+                r.attempts
+            );
             for rt in self.mixes.values_mut() {
                 if let Some(l) = rt.outputs.remove(&name) {
                     l.unload();
                 }
             }
-            // Suspending the device clears its error state.
-            let _ = pactl::suspend_sink(&name, true);
-            std::thread::sleep(Duration::from_millis(300));
-            let _ = pactl::suspend_sink(&name, false);
-            self.needs_sync = true;
+            if failed {
+                // Suspending the device clears its error state.
+                let _ = pactl::suspend_sink(&name, true);
+                std::thread::sleep(Duration::from_millis(300));
+                let _ = pactl::suspend_sink(&name, false);
+            }
+        }
+        // Reconnect the ones whose wait is over.
+        for (name, r) in &mut self.bt_reconnects {
+            if r.waiting && now >= r.not_before {
+                r.waiting = false;
+                eprintln!("linuxlink: reconnecting {name}");
+                self.needs_sync = true;
+            }
         }
     }
 
@@ -620,7 +718,8 @@ impl Engine {
             self.needs_sync |= after != before;
         }
         self.refreshes = self.refreshes.wrapping_add(1);
-        if self.refreshes.is_multiple_of(4) {
+        // Every 2 s, or each refresh while a reconnect is pending.
+        if self.refreshes.is_multiple_of(4) || self.bt_reconnects.values().any(|r| r.waiting) {
             self.heal_bluetooth();
         }
         // Pick up apps installed while LinuxLink runs, about once a minute.
@@ -644,21 +743,20 @@ impl Engine {
 
         // Re-apply anything that drifted, e.g. WirePlumber restoring a saved
         // stream volume or another mixer app touching our streams.
-        let drifted = |applied: &Option<Level>, volume: Option<u32>, muted: bool| {
-            applied.as_ref().is_some_and(|a| a.muted != muted || volume.is_some_and(|v| v.abs_diff(a.volume) > 1))
-        };
         let by_module: HashMap<u32, &pactl::SinkInput> =
             inputs.iter().filter_map(|i| Some((i.owner_module?, i))).collect();
         for send in self.sends.values_mut() {
             let si = send.module.and_then(|m| by_module.get(&m));
-            if si.map(|i| i.index) != send.sink_input || si.is_some_and(|i| drifted(&send.applied, i.volume, i.muted)) {
+            if si.map(|i| i.index) != send.sink_input
+                || si.is_some_and(|i| Gain::drifted(&send.applied, i.volume_raw, i.muted))
+            {
                 send.sink_input = si.map(|i| i.index);
                 send.applied = None;
             }
         }
         for (id, rt) in &mut self.mixes {
             if let Some(s) = sinks.iter().find(|s| s.name == mix_sink(id)) {
-                if drifted(&rt.applied, s.volume, s.muted) {
+                if Gain::drifted(&rt.applied, s.volume_raw, s.muted) {
                     rt.applied = None;
                 }
             }
@@ -737,6 +835,31 @@ impl Engine {
         Ok(())
     }
 
+    /// Voice ducking: measures the key channels and moves the reduction
+    /// towards the full amount while they're loud, and back when they're not.
+    fn update_ducking(&mut self) {
+        let now = Instant::now();
+        let dt = (now - self.last_duck).as_secs_f32().min(0.2);
+        self.last_duck = now;
+        let d = &self.cfg.ducking;
+        if !d.active() {
+            self.duck_probes.clear();
+            self.ducker.reset();
+            self.duck_db = 0.0;
+            return;
+        }
+        let sources: HashSet<String> =
+            d.keys.iter().filter_map(|k| self.cfg.channel(k)).map(channel_capture).filter(|s| !s.is_empty()).collect();
+        self.duck_probes.retain(|s, _| sources.contains(s));
+        for s in sources {
+            self.duck_probes.entry(s.clone()).or_insert_with(|| Probe::start(&s));
+        }
+        let peak = self.duck_probes.values().map(Probe::take_peak).fold(0.0, f32::max);
+        let reduction = self.ducker.step(peak, dt, d.sensitivity, d.amount, d.speed);
+        // Half-dB steps: smooth to the ear, and few volume changes per ramp.
+        self.duck_db = (reduction * 2.0).round() / 2.0;
+    }
+
     /// Pushes fader and mute state that differs from what was last applied.
     fn reconcile_levels(&mut self) {
         let mut errors = Vec::new();
@@ -744,21 +867,25 @@ impl Engine {
             for (mix_id, send_level) in &ch.sends {
                 let Some(send) = self.sends.get_mut(&(ch.id.clone(), mix_id.clone())) else { continue };
                 let Some(si) = send.sink_input else { continue };
-                let want = effective(ch, send_level);
-                if send.applied.as_ref() != Some(&want) {
+                let duck = if self.cfg.ducking.ducks(&ch.id, mix_id) { self.duck_db } else { 0.0 };
+                let want = Gain::send(ch, send_level, duck);
+                if send.applied != Some(want) {
                     // Record even on failure; a new sink-input index resets it.
-                    errors.extend(pactl::set_sink_input_volume(si, want.volume).err());
-                    errors.extend(pactl::set_sink_input_mute(si, want.muted).err());
+                    errors.extend(pactl::set_sink_input_volume_raw(si, want.raw).err());
+                    if send.applied.is_none_or(|a| a.muted != want.muted) {
+                        errors.extend(pactl::set_sink_input_mute(si, want.muted).err());
+                    }
                     send.applied = Some(want);
                 }
             }
         }
         for mix in &self.cfg.mixes {
             let Some(rt) = self.mixes.get_mut(&mix.id) else { continue };
-            if rt.applied.as_ref() != Some(&mix.level) {
-                rt.applied = Some(mix.level.clone());
-                errors.extend(pactl::set_sink_volume(&mix_sink(&mix.id), mix.level.volume).err());
-                errors.extend(pactl::set_sink_mute(&mix_sink(&mix.id), mix.level.muted).err());
+            let want = Gain::fader(&mix.level);
+            if rt.applied != Some(want) {
+                rt.applied = Some(want);
+                errors.extend(pactl::set_sink_volume_raw(&mix_sink(&mix.id), want.raw).err());
+                errors.extend(pactl::set_sink_mute(&mix_sink(&mix.id), want.muted).err());
             }
         }
         for e in errors {
@@ -878,6 +1005,13 @@ impl EngineHandle {
         let _ = self.tx.send(cmd);
     }
 
+    /// A handle with no engine behind it, whose commands land in the receiver.
+    #[cfg(test)]
+    pub fn detached() -> (Self, mpsc::Receiver<Command>) {
+        let (tx, rx) = mpsc::channel();
+        (Self { tx, snapshot: Arc::default(), join: Mutex::new(None) }, rx)
+    }
+
     /// Tears the audio graph down and waits for it. Safe to call repeatedly.
     pub fn shutdown(&self) {
         if let Some(join) = self.join.lock().unwrap().take() {
@@ -903,10 +1037,16 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
         node_ids: HashMap::new(),
         bluetooth: Vec::new(),
         refreshes: 0,
+        bt_stalls: HashMap::new(),
+        bt_reconnects: HashMap::new(),
         app_index: crate::apps::AppIndex::load(),
         input_levels: HashMap::new(),
         guard_until: None,
         listen_switches: 0,
+        duck_probes: HashMap::new(),
+        ducker: Ducker::default(),
+        duck_db: 0.0,
+        last_duck: Instant::now(),
         seen_streams: HashSet::new(),
         live_apps: Vec::new(),
         snapshot: snapshot.clone(),
@@ -925,7 +1065,9 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
             let mut last_refresh: Option<Instant> = None;
             loop {
                 let mut cmds = Vec::new();
-                match rx.recv_timeout(Duration::from_millis(100)) {
+                // Ducking follows your voice, so it needs a quicker pulse.
+                let tick = if engine.cfg.ducking.active() { 20 } else { 100 };
+                match rx.recv_timeout(Duration::from_millis(tick)) {
                     Ok(c) => cmds.push(c),
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => cmds.push(Command::Shutdown),
@@ -971,7 +1113,11 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
                     }
                     last_refresh = Some(Instant::now());
                 }
+                engine.update_ducking();
                 engine.reconcile_levels();
+                if let Ok(mut snap) = engine.snapshot.try_lock() {
+                    snap.ducking_db = engine.duck_db;
+                }
                 engine.save_if_due();
             }
         })
@@ -982,14 +1128,15 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
 
 #[cfg(test)]
 mod tests {
-    use super::node_failed;
+    use super::node_state;
 
     #[test]
-    fn spots_failed_nodes_in_pw_cli_output() {
+    fn reads_node_state_from_pw_cli_output() {
         let failed = "\tid: 566\n*\tstate: \"error\"\n*\terror: \"Received error event\"\n";
         let fine = "\tid: 566\n*\tstate: \"running\"\n*\tmax-input-ports: 0\n";
-        assert!(node_failed(failed));
-        assert!(!node_failed(fine));
-        assert!(!node_failed("\tmedia.name = \"state: error\"\n"));
+        assert_eq!(node_state(failed), Some("error"));
+        assert_eq!(node_state(fine), Some("running"));
+        assert_eq!(node_state("\tstate: \"suspended\"\n"), Some("suspended"));
+        assert_eq!(node_state("\tmedia.name = \"state: error\"\n"), None);
     }
 }

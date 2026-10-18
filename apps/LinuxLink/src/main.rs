@@ -1,9 +1,11 @@
+mod api;
 mod apps;
 mod config;
 mod engine;
 mod icons;
 mod instance;
 mod integrate;
+mod levels;
 mod meter;
 mod pactl;
 mod sys;
@@ -51,6 +53,7 @@ fn main() -> anyhow::Result<()> {
     let engine = engine::spawn(cfg.clone(), defaults);
     let updater = updater::Updater::start();
     let shared = Arc::new(Mutex::new(cfg));
+    api::spawn(shared.clone(), engine.clone());
 
     let (requests_tx, requests) = mpsc::channel();
     let _tray = tray::spawn(requests_tx);
@@ -64,6 +67,7 @@ fn main() -> anyhow::Result<()> {
         // Normal shutdown takes a few seconds (it guards the mic volume).
         std::thread::sleep(Duration::from_secs(10));
         handle.shutdown();
+        api::remove_port_file();
         std::process::exit(0);
     })?;
 
@@ -86,6 +90,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
     engine.shutdown();
+    api::remove_port_file();
 
     // "Restart to update": launch the freshly installed version.
     if let Some(program) = updater.take_restart() {

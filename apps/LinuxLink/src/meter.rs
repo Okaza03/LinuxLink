@@ -65,8 +65,13 @@ impl Meter {
         Self { peak, stop, child, display: 0.0 }
     }
 
+    /// The highest peak since the last call (linear amplitude).
+    fn take_peak(&self) -> f32 {
+        f32::from_bits(self.peak.swap(0, Ordering::Relaxed))
+    }
+
     fn tick(&mut self, dt: f32) -> f32 {
-        let peak = f32::from_bits(self.peak.swap(0, Ordering::Relaxed));
+        let peak = self.take_peak();
         // Instant attack, ~1.5 s fall from full scale.
         self.display = peak.max(self.display * (-dt * 3.0).exp());
         self.display
@@ -80,6 +85,20 @@ impl Drop for Meter {
             let _ = proc.kill();
             let _ = proc.wait();
         }
+    }
+}
+
+/// Raw peaks of one source, for the engine's voice ducking.
+pub struct Probe(Meter);
+
+impl Probe {
+    pub fn start(source: &str) -> Self {
+        Self(Meter::start(source.to_string()))
+    }
+
+    /// The highest peak since the last call (linear amplitude).
+    pub fn take_peak(&self) -> f32 {
+        self.0.take_peak()
     }
 }
 

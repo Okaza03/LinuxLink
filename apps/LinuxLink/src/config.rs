@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-pub const CONFIG_VERSION: u32 = 3;
+pub use crate::levels::{Speed, Step};
+
+pub const CONFIG_VERSION: u32 = 4;
+/// Wave Link 3's limit on output mixes.
 pub const MAX_MIXES: usize = 5;
 /// Placeholder output replaced by the system's default sink on startup.
 pub const DEFAULT_OUTPUT: &str = "@default";
@@ -12,6 +15,8 @@ pub const LATENCY_CHOICES: &[(u32, &str)] =
 pub const MIX_ICONS: &[&str] = &["🎧", "👥", "📡", "⏺", "💬", "🎮", "🔊", "🎬"];
 pub const CHANNEL_ICONS: &[&str] = &["🖥", "🎵", "🌐", "🎮", "💬", "✨", "🎤", "🎬", "🔔", "📺", "🎹", "📞"];
 
+/// A fader and its mute. `volume` is the fader position, 0–100, which is
+/// linear in dB over 60 dB (see `levels`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Level {
     pub volume: u32,
@@ -47,6 +52,106 @@ pub struct ChannelCfg {
     pub level: Level,
     /// Mix id -> send level. A missing entry means "not routed to that mix".
     pub sends: BTreeMap<String, Level>,
+    /// Extra gain on every send of this channel.
+    #[serde(default)]
+    pub boost: Boost,
+    /// Hidden from the Mixes page; its audio keeps flowing.
+    #[serde(default)]
+    pub hidden: bool,
+}
+
+/// Wave Link's channel boost: up to `MAX_BOOST_DB` on top of the faders.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Boost {
+    pub enabled: bool,
+    pub db: f32,
+}
+
+impl Default for Boost {
+    fn default() -> Self {
+        Self { enabled: false, db: 6.0 }
+    }
+}
+
+impl Boost {
+    /// The gain it adds, in dB.
+    pub fn gain_db(&self) -> f32 {
+        if self.enabled {
+            self.db.clamp(0.0, crate::levels::MAX_BOOST_DB)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Voice ducking: while a key channel (your mic, say) is loud, the ducked
+/// channels are lowered in the mixes chosen for them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DuckingCfg {
+    /// Channels whose sound triggers ducking.
+    pub keys: BTreeSet<String>,
+    /// Channel id -> the mixes it is ducked in.
+    pub ducked: BTreeMap<String, BTreeSet<String>>,
+    pub sensitivity: Step,
+    pub amount: Step,
+    pub speed: Speed,
+}
+
+impl Default for DuckingCfg {
+    fn default() -> Self {
+        Self {
+            keys: BTreeSet::from(["mic".to_string()]),
+            ducked: BTreeMap::new(),
+            sensitivity: Step::Medium,
+            amount: Step::Medium,
+            speed: Speed::Medium,
+        }
+    }
+}
+
+impl DuckingCfg {
+    /// Whether `channel` is ducked in `mix` (key channels never duck themselves).
+    pub fn ducks(&self, channel: &str, mix: &str) -> bool {
+        !self.keys.contains(channel) && self.ducked.get(channel).is_some_and(|m| m.contains(mix))
+    }
+
+    pub fn set(&mut self, channel: &str, mix: &str, on: bool) {
+        let mixes = self.ducked.entry(channel.to_string()).or_default();
+        if on {
+            mixes.insert(mix.to_string());
+        } else {
+            mixes.remove(mix);
+        }
+        if mixes.is_empty() {
+            self.ducked.remove(channel);
+        }
+    }
+
+    /// Whether anything can be ducked at all.
+    pub fn active(&self) -> bool {
+        !self.keys.is_empty() && self.ducked.keys().any(|c| !self.keys.contains(c))
+    }
+}
+
+/// Wave Link's colour themes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    /// Same as the desktop.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// Wave Link's window modes: the full mixer, or a small one-mix view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowMode {
+    #[default]
+    Full,
+    Compact,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +198,13 @@ pub struct Config {
     pub close_to_tray: bool,
     /// AppImage only: keep a LinuxLink entry (and icon) in the app menu.
     pub appimage_menu_entry: bool,
+    pub ducking: DuckingCfg,
+    pub window_mode: WindowMode,
+    /// The mix shown in the compact view.
+    pub compact_mix: Option<String>,
+    /// Serve the local control API (for Stream Deck style controllers).
+    pub api_enabled: bool,
+    pub theme: Theme,
 }
 
 impl Default for Config {
@@ -120,6 +232,8 @@ impl Default for Config {
             kind,
             level: Level::full(),
             sends: mixes.iter().map(|m| (m.id.clone(), Level::full())).collect(),
+            boost: Boost::default(),
+            hidden: false,
         };
         let mut mic = channel("mic", "Microphone", "🎤", ChannelKind::Input { source: String::new() });
         // Don't hear yourself by default.
@@ -148,6 +262,11 @@ impl Default for Config {
             last_seen_version: None,
             close_to_tray: true,
             appimage_menu_entry: true,
+            ducking: DuckingCfg::default(),
+            window_mode: WindowMode::Full,
+            compact_mix: None,
+            api_enabled: true,
+            theme: Theme::System,
         }
     }
 }
@@ -162,6 +281,11 @@ impl Config {
         let Ok(s) = std::fs::read_to_string(&path) else { return Self::default() };
         match toml::from_str::<Self>(&s) {
             Ok(cfg) if cfg.version == CONFIG_VERSION => cfg,
+            Ok(mut cfg) if cfg.version == 3 => {
+                let _ = std::fs::copy(&path, path.with_extension("toml.v3.bak"));
+                cfg.migrate_from_v3();
+                cfg
+            }
             result => {
                 let backup = path.with_extension("toml.bak");
                 let _ = std::fs::copy(&path, &backup);
@@ -190,6 +314,24 @@ impl Config {
         }
         std::fs::rename(&tmp, &path)?;
         Ok(())
+    }
+
+    /// Format 3 stored pulse volume percentages; format 4 stores fader
+    /// positions on Wave Link's dB scale. Keep every level sounding the same.
+    fn migrate_from_v3(&mut self) {
+        use crate::levels::position_from_percent as pos;
+        let convert = |l: &mut Level| l.volume = pos(l.volume);
+        for ch in &mut self.channels {
+            // An input channel's master is the device's own volume, unchanged.
+            if ch.kind == ChannelKind::Virtual {
+                convert(&mut ch.level);
+            }
+            ch.sends.values_mut().for_each(convert);
+        }
+        for mix in &mut self.mixes {
+            convert(&mut mix.level);
+        }
+        self.version = CONFIG_VERSION;
     }
 
     pub fn channel(&self, id: &str) -> Option<&ChannelCfg> {
@@ -252,9 +394,52 @@ mod tests {
         cfg.last_seen_version = Some("0.1.0".into());
         cfg.close_to_tray = false;
         cfg.appimage_menu_entry = false;
+        cfg.channels[4].boost = Boost { enabled: true, db: 4.5 };
+        cfg.channels[5].hidden = true;
+        cfg.ducking.keys.insert("chat".into());
+        cfg.ducking.set("music", "stream", true);
+        cfg.ducking.sensitivity = Step::High;
+        cfg.ducking.amount = Step::Low;
+        cfg.ducking.speed = Speed::Fast;
+        cfg.window_mode = WindowMode::Compact;
+        cfg.compact_mix = Some("stream".into());
+        cfg.api_enabled = false;
+        cfg.theme = Theme::Light;
 
         let text = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn version_3_volumes_become_fader_positions() {
+        let mut cfg = Config { version: 3, ..Default::default() };
+        cfg.channels[1].level = Level::new(50, false);
+        cfg.channels[1].sends.insert("stream".into(), Level::new(100, true));
+        cfg.channels[0].level = Level::new(50, false); // the mic: device volume
+        cfg.mixes[0].level = Level::new(0, false);
+        let mut back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
+        back.migrate_from_v3();
+        assert_eq!(back.version, CONFIG_VERSION);
+        assert_eq!(back.channels[1].level, Level::new(70, false));
+        assert_eq!(back.channels[1].sends["stream"], Level::new(100, true));
+        assert_eq!(back.channels[0].level, Level::new(50, false));
+        assert_eq!(back.mixes[0].level.volume, 0);
+        assert_eq!(back.ducking, DuckingCfg::default());
+    }
+
+    #[test]
+    fn ducking_never_ducks_a_key_channel() {
+        let mut d = DuckingCfg::default();
+        assert!(!d.active());
+        d.set("mic", "my_mix", true);
+        assert!(!d.ducks("mic", "my_mix"));
+        assert!(!d.active());
+        d.set("music", "my_mix", true);
+        assert!(d.ducks("music", "my_mix"));
+        assert!(!d.ducks("music", "stream"));
+        assert!(d.active());
+        d.set("music", "my_mix", false);
+        assert!(!d.ducked.contains_key("music"));
     }
 }

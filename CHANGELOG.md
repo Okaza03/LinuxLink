@@ -9,6 +9,48 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+LinuxLink now behaves like Wave Link 3 down to its numbers: faders, voice
+ducking, channel boost, a compact view and a control API.
+
+### Added
+
+- **Voice ducking.** While your microphone (or any channel you choose) is
+  loud, music and games go down in the mixes you pick, so people hear you.
+  Sensitivity, amount (6, 12 or 24 dB) and speed use Wave Link's presets.
+  Find it in **Settings → Voice ducking**.
+- **Channel boost** of up to +12 dB in a channel's settings, for quiet apps
+  and microphones.
+- **Mix volume** row under the mix headers.
+- **Reorder and hide.** Right-click a channel to move or hide it, or a mix
+  header to move it.
+- **Compact view:** one mix's faders in a small window.
+- A **⚠** on a microphone's cell when you'd hear yourself in that mix.
+- **Control API:** a local WebSocket API in the style of Wave Link's, for
+  Stream Deck style controllers and scripts (Settings → Control API).
+- Channel settings suggest the apps people usually put in a channel, and list
+  apps playing now first, then ones played before.
+
+### Changed
+
+- **Looks like Wave Link 3:** its colours, fader, mix headers and spacing; a
+  light theme (**Settings → General → Color theme**, which follows your
+  desktop by default); Settings with tabs; a device page with the device on
+  the left and its settings on the right; and a **Create channel** list of
+  your inputs and apps to pick from. The update button only appears when
+  there's an update; **Settings → Updates** always shows the status.
+- **Faders work like Wave Link's:** linear in decibels over 60 dB, so the
+  middle is −30 dB. Hover a fader to see its value. Your existing levels are
+  converted and sound exactly as before.
+
+### Fixed
+
+- **Bluetooth headsets no longer stay silent after LinuxLink starts.** A
+  headset that failed while LinuxLink was connecting to it ("Failure in
+  Bluetooth audio transport") could end up stuck until you switched to another
+  output and back. LinuxLink now also spots a headset that has quietly stopped
+  playing, waits for it to restart before reconnecting, and retries with
+  increasing pauses.
+
 ## [0.1.3] - 2026-10-17
 
 Apps show their real names and icons, and the documentation grew a lot.

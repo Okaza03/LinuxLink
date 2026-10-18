@@ -29,8 +29,16 @@ every channel. It is modelled on Elgato Wave Link 3 and built on PipeWire.
   like. Every mix is also a **virtual microphone** for OBS, Discord or a recorder.
 - **Microphones and inputs** as channels, with real device gain, mute and live
   meters.
-- **Faders that feel right:** level meters in every track, ticks every 10%,
-  snapping to 25/50/75%.
+- **Faders that work like Wave Link's:** linear in decibels over 60 dB, with
+  level meters in every track, ticks every 6 dB and snapping to −45/−30/−15 dB.
+- **Voice ducking:** your microphone (or any channel) lowers music and games
+  in the mixes you choose while you talk, with Wave Link's sensitivity, amount
+  and speed presets.
+- **Channel boost** of up to +12 dB for quiet apps and microphones.
+- **Your layout:** reorder channels and mixes, hide channels you don't need to
+  see, and switch to a **compact view** with one mix's faders.
+- **Control API:** a local WebSocket API in the style of Wave Link's, for
+  Stream Deck style controllers and scripts.
 - **Stays out of the way.** Closing the window keeps LinuxLink running in the
   system tray; optionally start with your computer.
 - **Bluetooth headsets just work:** connect one and your mixes move to it.

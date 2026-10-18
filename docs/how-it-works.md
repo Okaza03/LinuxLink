@@ -21,9 +21,12 @@ PipeWire and keeps that graph in sync with your settings.
 
 Volumes map onto that graph like this:
 
-- **A cell's fader** is the volume of its send loopback: channel master × cell
-  fader. Two mixes can hold the same channel at different volumes because each
-  has its own loopback.
+- **A cell's fader** is the volume of its send loopback: channel master + cell
+  fader + boost − ducking, in dB. Two mixes can hold the same channel at
+  different volumes because each has its own loopback.
+- **Faders follow Wave Link 3's law** (`levels.rs`): linear in dB over 60 dB.
+  PipeWire's pulse volumes are cubic, so LinuxLink sets raw volumes
+  (`65536 × 10^(dB/60)`), which hit every dB value exactly.
 - **An input channel's master** is the hardware source's own volume, so other
   apps see the same level.
 - **A mix's master** is the volume of the mix sink.
@@ -35,6 +38,25 @@ id, application name and executable against installed menu entries (desktop
 id, `Exec`, `StartupWMClass`, `Name`; Steam games via `steam://rungameid/`).
 Rules are stored per identity and also matched against the stream's raw
 binary name, application name and Flatpak id.
+
+## Voice ducking
+
+The engine measures each trigger channel with a low-rate `parec` capture and
+ramps a reduction towards the chosen amount while the loudest one is above
+the sensitivity threshold, and back to zero when it isn't, linearly in dB
+over the attack and release times. The reduction (in half-dB steps) is
+subtracted from the ducked channels' sends in the chosen mixes. While ducking
+is set up, the engine runs every 20 ms instead of every 100 ms.
+
+## Control API
+
+`api.rs` serves JSON-RPC 2.0 over a WebSocket on 127.0.0.1 (see
+[configuration.md](configuration.md#control-api)). Changes go into the
+settings the window shares, then to the engine as a normal settings update;
+the window adopts them on its next frame. A watcher thread compares what
+clients see every 150 ms and sends `*Changed` notifications. Origins other
+than none, `file://` and `streamdeck://` (that is, web pages) are refused, and
+so are Host headers other than loopback, against DNS rebinding.
 
 ## Devices coming and going
 
@@ -63,6 +85,8 @@ All code lives in `apps/LinuxLink/src/`:
 | `engine.rs` | Builds and reconciles the PipeWire graph on a worker thread |
 | `pactl.rs` | Thin wrapper around `pactl` (JSON output) |
 | `meter.rs` | Peak meters, one low-rate `parec` capture per source |
+| `levels.rs` | Wave Link's fader law, dB maths and ducking presets |
+| `api.rs` | The local WebSocket control API |
 | `config.rs` | Settings model, load/save (`~/.config/linuxlink/config.toml`) |
 | `ui.rs` | The egui interface |
 | `updater.rs` | Update checks, downloads, verification and installation |

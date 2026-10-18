@@ -14,6 +14,8 @@ pub struct Device {
     pub name: String,
     pub description: String,
     pub volume: Option<u32>,
+    /// Raw pulse volume of the first channel (65536 = 100%).
+    pub volume_raw: Option<u32>,
     pub muted: bool,
     /// PipeWire's id for the device's node.
     pub node_id: Option<u32>,
@@ -24,7 +26,8 @@ pub struct SinkInput {
     pub index: u32,
     pub sink: u32,
     pub owner_module: Option<u32>,
-    pub volume: Option<u32>,
+    /// Raw pulse volume of the first channel (65536 = 100%).
+    pub volume_raw: Option<u32>,
     pub muted: bool,
     pub props: Map<String, Value>,
 }
@@ -56,10 +59,15 @@ fn as_u32(v: Option<&Value>) -> Option<u32> {
     v.and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok())).filter(|&n| n < u32::MAX as u64).map(|n| n as u32)
 }
 
+/// Raw volume of the first channel (65536 = 100%).
+fn volume_raw(v: &Value) -> Option<u32> {
+    let raw = v.get("volume")?.as_object()?.values().next()?.get("value")?.as_u64()?;
+    u32::try_from(raw).ok()
+}
+
 /// Volume of the first channel, in percent.
 fn volume_percent(v: &Value) -> Option<u32> {
-    let raw = v.get("volume")?.as_object()?.values().next()?.get("value")?.as_u64()?;
-    Some(((raw * 100 + 32768) / 65536) as u32)
+    volume_raw(v).map(|raw| (raw * 100 + 32768) / 65536)
 }
 
 fn muted(v: &Value) -> bool {
@@ -115,6 +123,7 @@ fn devices(kind: &str) -> Result<Vec<Device>> {
                 name,
                 description,
                 volume: volume_percent(d),
+                volume_raw: volume_raw(d),
                 muted: muted(d),
                 node_id: as_u32(d.pointer("/properties/object.id")),
             })
@@ -138,7 +147,7 @@ pub fn sink_inputs() -> Result<Vec<SinkInput>> {
                 index: as_u32(v.get("index"))?,
                 sink: as_u32(v.get("sink"))?,
                 owner_module: as_u32(v.get("owner_module")),
-                volume: volume_percent(&v),
+                volume_raw: volume_raw(&v),
                 muted: muted(&v),
                 props: v.get("properties")?.as_object()?.clone(),
             })
@@ -184,16 +193,17 @@ fn bool_arg(b: bool) -> &'static str {
     }
 }
 
-pub fn set_sink_input_volume(index: u32, percent: u32) -> Result<()> {
-    run(&["set-sink-input-volume", &index.to_string(), &format!("{percent}%")]).map(drop)
+/// `raw` is a pulse volume (65536 = 100%); see `levels::raw_volume`.
+pub fn set_sink_input_volume_raw(index: u32, raw: u32) -> Result<()> {
+    run(&["set-sink-input-volume", &index.to_string(), &raw.to_string()]).map(drop)
 }
 
 pub fn set_sink_input_mute(index: u32, muted: bool) -> Result<()> {
     run(&["set-sink-input-mute", &index.to_string(), bool_arg(muted)]).map(drop)
 }
 
-pub fn set_sink_volume(sink: &str, percent: u32) -> Result<()> {
-    run(&["set-sink-volume", sink, &format!("{percent}%")]).map(drop)
+pub fn set_sink_volume_raw(sink: &str, raw: u32) -> Result<()> {
+    run(&["set-sink-volume", sink, &raw.to_string()]).map(drop)
 }
 
 pub fn set_sink_mute(sink: &str, muted: bool) -> Result<()> {

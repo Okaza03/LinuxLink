@@ -37,10 +37,16 @@ An app can only be in one channel; ticking it in another channel moves it.
 
 ### Creating, renaming and deleting channels
 
-- **Create channel** (below the last row) makes a new app channel, or an input
-  channel for a microphone or other input device.
+- **Create channel** (below the last row) lists your input devices and apps:
+  pick one to make a channel for it (an app's channel is named after it and
+  plays it from then on), or choose **Add empty channel** to start from
+  scratch.
 - In a channel's settings you can rename it, pick an icon, choose the input
-  device (for input channels) or **Delete channel**.
+  device (for input channels), **Boost** it by up to 12 dB in every mix (for a
+  quiet app or microphone), hide it, or **Delete channel**.
+- Right-click a channel's name to **Move up**, **Move down** or **Hide** it.
+  Hidden channels keep playing; the **👁 hidden channels** button below the
+  last row shows them again.
 
 ## Mixes
 
@@ -63,17 +69,48 @@ your listening device automatically.
 
 Each cell is one channel's volume *in that mix*:
 
-- Drag the fader to set the volume. Faders snap to 25%, 50% and 75%.
+- Drag the fader to set the volume. Like Wave Link's, faders are linear in
+  decibels: the right end is full volume (0 dB), the middle is −30 dB, and
+  the left end is silence. Hover a fader to see its value. Faders snap to
+  −45, −30 and −15 dB.
 - Click the speaker to mute the channel in this mix only. Muted cells turn red.
 - An empty cell means the channel isn't in that mix. Click **+** to add it;
   right-click a cell and choose **Remove from this mix** to take it out.
+- **↓** means voice ducking lowers the channel in this mix (blue while it's
+  ducking). **⚠** on a microphone means you listen to this mix, so you'll
+  hear yourself slightly delayed; mute it there if that bothers you.
+
+The **Mix volume** row under the headers sets each mix's overall volume.
 
 ### Mix settings
 
 Click a mix's header to rename it, choose an icon, turn listening on or off, or
 send it to **extra outputs** (for example a capture card or a second headset).
 Each output device plays at most one mix. You can have up to five mixes; add
-one with the **+** next to the last header.
+one with the **+** next to the last header. Right-click a header to move the
+mix left or right.
+
+### Compact view
+
+**🗗 Compact view** (next to the listening device) shrinks the window to one
+mix: pick the mix at the top, and each channel gets a mute and fader for it.
+**⛶ Full view** brings the full mixer back. LinuxLink remembers the view.
+
+## Voice ducking
+
+Ducking lowers some channels while another is loud: typically music and games
+go down while you talk, so your stream or call hears you clearly. Set it up in
+**Settings → Voice ducking**:
+
+- **Triggered by:** the channels that cause ducking (your microphone by
+  default; Voice Chat works too, to hear your friends over the game).
+- **Sensitivity:** higher reacts to quieter sound.
+- **Amount:** how far the other channels go down: 6, 12 or 24 dB.
+- **Speed:** how quickly ducking starts and stops.
+- **Duck these channels:** tick a channel under each mix it should be lowered
+  in. You might duck music in Stream only, and keep it steady in My Mix.
+
+Ducking works whether the window is open or LinuxLink runs in the tray.
 
 ## Using a mix in OBS, Discord and other apps
 
@@ -124,8 +161,10 @@ choice keeps working across restarts and updates.
 | Click 🎧 on a mix header | Turns hearing that mix on or off |
 | Click **+** on an empty cell | Adds that channel to that mix |
 | Right-click a cell | **Remove from this mix** |
+| Right-click a channel's name | **Move up**, **Move down**, **Hide channel** |
+| Right-click a mix's header | **Move left**, **Move right** |
 | Click a speaker button | Mutes or unmutes (red means muted) |
-| Drag a fader | Sets the volume; snaps to 25%, 50% and 75% when close |
+| Drag a fader | Sets the volume; snaps to −45, −30 and −15 dB when close |
 | Search box in a channel | Type to find any installed app |
 | Left-click the tray icon | Opens the window |
 | Right-click the tray icon | **Open LinuxLink** / **Quit** |
@@ -137,13 +176,20 @@ its level, or **Add as channel**.
 
 ## Settings
 
+Settings has a tab for each area, like Wave Link's:
+
+- **General:** the **color theme** (same as your desktop, light or dark),
+  starting with your computer, whether closing the window keeps LinuxLink
+  running, which channel apps play through by default, latency (lower is
+  snappier; raise it if you hear crackling), and **Quit LinuxLink**.
 - **Listening:** your listening device and which mixes you hear.
-- **General:** which channel apps play through by default, whether closing the
-  window keeps LinuxLink running, and whether it starts with your computer.
-- **Input devices / Output devices:** switch off devices you never use to hide
-  them from LinuxLink. Other apps can still use them.
-- **Audio → Latency:** lower is snappier; raise it if you hear crackling.
-- **About:** version, **What's new**, and links to report a problem.
+- **Voice ducking:** see [Voice ducking](#voice-ducking).
+- **Devices:** switch off devices you never use to hide them from LinuxLink.
+  Other apps can still use them.
+- **Control API:** lets programs on this computer control LinuxLink (see
+  [configuration.md](configuration.md#control-api)). Websites can't use it.
+- **Updates:** the update status, and **What's new**.
+- **About:** links to the project and to report a problem.
 
 ## Closing, the tray and starting with your computer
 
@@ -152,8 +198,8 @@ window (X) therefore closes only the window: LinuxLink keeps running, with an
 icon in the system tray, and your audio keeps working. To get the window back,
 click the tray icon, choose **Open LinuxLink** from its menu, or start
 LinuxLink from your app menu again. To quit for real, right-click the tray
-icon and choose **Quit**, or use **Quit LinuxLink** at the bottom of the
-sidebar.
+icon and choose **Quit**, or use **Quit LinuxLink** in **Settings →
+General**.
 
 If your desktop has no system tray, closing the window minimizes it to the
 taskbar instead, so LinuxLink can't get lost.
@@ -169,8 +215,8 @@ Keep running when closed**.
 
 ## Updates
 
-The button in the lower-right corner shows whether you're **Up to date**.
-When a new version is out it changes to **Download new update**:
+**Settings → Updates** shows whether you're up to date. When a new version is
+out, a **Download new update** button also appears in the lower-right corner:
 
 | Installed as | What happens |
 | --- | --- |
