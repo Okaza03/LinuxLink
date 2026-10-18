@@ -4,7 +4,7 @@
 # to replace SKIP with the real checksum after bumping pkgver.
 
 pkgname=linuxlink
-pkgver=0.1.3
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="A Wave Link style audio mixer for Linux (PipeWire)"
 arch=('x86_64' 'aarch64')
