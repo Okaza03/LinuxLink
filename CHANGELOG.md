@@ -9,12 +9,22 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-21
+
+Bluetooth headsets now play the moment they connect, and devices you never
+use can be turned off for your whole computer.
+
 ### Added
 
 - **Turn devices off for the whole computer.** In **Settings**, turn on
   **Turn them off on this computer too** and the devices you switch off
   disappear from your system's sound settings and other apps, not just from
-  LinuxLink. Switch them back on in the same place.
+  LinuxLink. Switch them back on in the same place. Applying a change
+  restarts the system's audio service, so sound drops out for a moment.
+  Only sound-card devices can be turned off this way; Bluetooth devices and
+  devices LinuxLink is using stay hidden from LinuxLink only. Needs
+  WirePlumber 0.5 or newer. `linuxlink --restore-devices` turns them all
+  back on, and uninstalling does it for you.
 
 ### Fixed
 
@@ -235,7 +245,8 @@ built on PipeWire.
   Flatpak, .deb (Debian, Ubuntu, Mint, Pop!_OS), .rpm (Fedora, openSUSE), an
   Arch Linux package, and a plain tarball.
 
-[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Okaza03/LinuxLink/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Okaza03/LinuxLink/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/Okaza03/LinuxLink/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Okaza03/LinuxLink/compare/v0.1.1...v0.1.2

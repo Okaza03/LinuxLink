@@ -68,6 +68,12 @@
   </supports>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.3.0" date="2026-10-21">
+      <url type="details">https://github.com/Okaza03/LinuxLink/releases/tag/v0.3.0</url>
+      <description>
+        <p>Bluetooth headsets play as soon as they connect or LinuxLink starts, quitting is quieter, and devices you switch off can be turned off for the whole computer.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-18">
       <url type="details">https://github.com/Okaza03/LinuxLink/releases/tag/v0.2.0</url>
       <description>
