@@ -185,6 +185,8 @@ Settings has a tab for each area, like Wave Link's:
 - **Listening:** your listening device and which mixes you hear.
 - **Voice ducking:** see [Voice ducking](#voice-ducking).
 - **Devices:** switch off devices you never use to hide them from LinuxLink.
+  Turn on **Turn them off on this computer too** to remove them from your
+  system's sound settings and other apps as well.
   Other apps can still use them.
 - **Control API:** lets programs on this computer control LinuxLink (see
   [configuration.md](configuration.md#control-api)). Websites can't use it.

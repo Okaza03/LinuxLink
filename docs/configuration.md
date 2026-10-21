@@ -22,7 +22,9 @@ defaults and keeps the old file as `config.toml.bak`.
 | `default_channel` | Channel id made the system default output while LinuxLink runs; unset = don't change it. |
 | `listen_output` | Your listening device (a PipeWire sink name). |
 | `listening` | Ids of the mixes with 🎧 on. |
-| `hidden_inputs`, `hidden_outputs` | Devices switched off in Settings (hidden from LinuxLink only). |
+| `hidden_inputs`, `hidden_outputs` | Devices switched off in Settings. |
+| `disable_hidden_on_system` | `true`: also turn switched-off sound-card devices off for the whole computer (see [below](#devices-turned-off-on-the-computer)). |
+| `hidden_labels` | Names of switched-off devices, to list them while they're gone. |
 | `latency_ms` | Buffer size of every connection, in milliseconds (10–80). |
 | `close_to_tray` | `true`: closing the window keeps LinuxLink running in the tray. |
 | `appimage_menu_entry` | AppImage only: keep LinuxLink in the app menu. |
@@ -74,6 +76,19 @@ remembers each app's name and icon so channels can list apps that aren't
 playing. Keys are `steam:<appid>` for Steam games, the Flatpak id for Flatpak
 apps, or the program's name, as LinuxLink identifies them (see the user guide).
 
+## Devices turned off on the computer
+
+With **Settings → Turn them off on this computer too** on, LinuxLink writes a
+WirePlumber rule, `~/.config/wireplumber/wireplumber.conf.d/90-linuxlink-disabled-devices.conf`,
+that disables the switched-off sound-card devices, then restarts WirePlumber
+(sound drops out for a moment). They then disappear from your system's sound
+settings and every app. Devices LinuxLink uses and Bluetooth devices are only
+hidden from LinuxLink. Needs WirePlumber 0.5 or newer.
+
+Switch a device back on in Settings, or run `linuxlink --restore-devices` to
+turn them all back on (the uninstall scripts do this for you). If LinuxLink is
+gone, delete the file and run `systemctl --user restart wireplumber`.
+
 ## Control API
 
 While `api_enabled` is on, LinuxLink serves JSON-RPC 2.0 over a WebSocket on
@@ -108,6 +123,7 @@ refused.
 | --- | --- |
 | `--version` | Print the version and exit. |
 | `--cleanup` | Remove LinuxLink's virtual devices left by a crash, then exit. |
+| `--restore-devices` | Turn devices LinuxLink turned off on the computer back on, then exit. |
 | `--minimized` | Start in the tray without opening the window (used by *Start with your computer*). |
 
 Running `linuxlink` while it's already running brings the window back.

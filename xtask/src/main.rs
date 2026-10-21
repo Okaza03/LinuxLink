@@ -162,6 +162,7 @@ fn uninstall() -> Result<(), String> {
     let paths = TestPaths::new();
     if paths.bin.exists() {
         let _ = Command::new(&paths.bin).arg("--cleanup").output();
+        let _ = Command::new(&paths.bin).arg("--restore-devices").status();
     }
     for p in [&paths.bin, &paths.desktop, &paths.icon, &paths.autostart] {
         match fs::remove_file(p) {

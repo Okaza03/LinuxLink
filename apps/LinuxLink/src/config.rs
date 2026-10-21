@@ -190,6 +190,11 @@ pub struct Config {
     /// Devices hidden from LinuxLink's lists (they keep working elsewhere).
     pub hidden_inputs: BTreeSet<String>,
     pub hidden_outputs: BTreeSet<String>,
+    /// Also turn hidden sound-card devices off for the whole computer.
+    pub disable_hidden_on_system: bool,
+    /// Names of hidden devices, to list them while they're turned off on the
+    /// computer (or disconnected) and PipeWire no longer reports them.
+    pub hidden_labels: BTreeMap<String, String>,
     /// Buffer size of every loopback, in milliseconds.
     pub latency_ms: u32,
     /// Version whose "What's new" notes were last shown.
@@ -258,6 +263,8 @@ impl Default for Config {
             listening: BTreeSet::from(["my_mix".to_string()]),
             hidden_inputs: BTreeSet::new(),
             hidden_outputs: BTreeSet::new(),
+            disable_hidden_on_system: false,
+            hidden_labels: BTreeMap::new(),
             latency_ms: 20,
             last_seen_version: None,
             close_to_tray: true,
@@ -334,6 +341,27 @@ impl Config {
         self.version = CONFIG_VERSION;
     }
 
+    /// Whether LinuxLink plays on or records from a device.
+    pub fn uses_device(&self, name: &str) -> bool {
+        self.listen_output.as_deref() == Some(name)
+            || self.mixes.iter().any(|m| m.outputs.iter().any(|o| o == name))
+            || self.channels.iter().any(|c| matches!(&c.kind, ChannelKind::Input { source } if source == name))
+    }
+
+    /// Hidden devices to turn off for the whole computer: sound-card devices
+    /// only, and never one LinuxLink itself uses.
+    pub fn system_disabled(&self) -> BTreeSet<String> {
+        if !self.disable_hidden_on_system {
+            return BTreeSet::new();
+        }
+        self.hidden_inputs
+            .iter()
+            .chain(&self.hidden_outputs)
+            .filter(|n| crate::system_devices::can_disable(n) && !self.uses_device(n))
+            .cloned()
+            .collect()
+    }
+
     pub fn channel(&self, id: &str) -> Option<&ChannelCfg> {
         self.channels.iter().find(|c| c.id == id)
     }
@@ -389,6 +417,8 @@ mod tests {
         cfg.listening = BTreeSet::from(["my_mix".to_string(), "rec".to_string()]);
         cfg.hidden_inputs.insert("alsa_input.line-in".into());
         cfg.hidden_outputs.insert("alsa_output.hdmi".into());
+        cfg.disable_hidden_on_system = true;
+        cfg.hidden_labels.insert("alsa_output.hdmi".into(), "HDMI".into());
         cfg.default_channel = Some("music".into());
         cfg.latency_ms = 40;
         cfg.last_seen_version = Some("0.1.0".into());
@@ -426,6 +456,22 @@ mod tests {
         assert_eq!(back.channels[0].level, Level::new(50, false));
         assert_eq!(back.mixes[0].level.volume, 0);
         assert_eq!(back.ducking, DuckingCfg::default());
+    }
+
+    #[test]
+    fn turns_off_only_unused_sound_card_devices() {
+        let mut cfg = Config::default();
+        cfg.hidden_outputs.extend([
+            "alsa_output.hdmi".into(),
+            "alsa_output.speakers".into(),
+            "bluez_output.AA.1".into(),
+        ]);
+        cfg.hidden_inputs.insert("alsa_input.line-in".into());
+        cfg.listen_output = Some("alsa_output.speakers".into());
+        assert!(cfg.system_disabled().is_empty());
+        cfg.disable_hidden_on_system = true;
+        let off: Vec<_> = cfg.system_disabled().into_iter().collect();
+        assert_eq!(off, ["alsa_input.line-in", "alsa_output.hdmi"]);
     }
 
     #[test]

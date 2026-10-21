@@ -9,6 +9,8 @@ ID=io.github.Okaza03.LinuxLink
 if [ -x "$PREFIX/bin/linuxlink" ]; then
   # Remove virtual devices left by a crashed instance.
   "$PREFIX/bin/linuxlink" --cleanup >/dev/null 2>&1 || true
+  # Turn back on devices it turned off for the whole computer.
+  "$PREFIX/bin/linuxlink" --restore-devices || true
 fi
 rm -f "$PREFIX/bin/linuxlink" \
   "$PREFIX/share/applications/$ID.desktop" \

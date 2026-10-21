@@ -15,7 +15,7 @@ use crate::levels::{self, Ducker, RAW_NORM};
 use crate::meter::Probe;
 use crate::pactl::{self, proplist, Device};
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -24,6 +24,20 @@ use std::time::{Duration, Instant};
 pub const PREFIX: &str = "linuxlink_";
 /// How long input volumes are protected after LinuxLink changes devices.
 const GUARD_FOR: Duration = Duration::from_secs(3);
+/// When a new loopback to a Bluetooth output has settled, so the output can
+/// be restarted under the right clock (see `restart_bluetooth`)...
+const BT_RESTART_AFTER: Duration = Duration::from_millis(500);
+/// ...or, when BlueZ can't tell whether its transport is up, a safe guess.
+const BT_RESTART_BLIND: Duration = Duration::from_secs(2);
+/// Stop waiting for a transport that never comes up (healing takes over).
+const BT_RESTART_GIVE_UP: Duration = Duration::from_secs(8);
+/// How long a restarted Bluetooth output is left to come back up.
+const BT_SETTLE: Duration = Duration::from_secs(3);
+/// Wait for device toggles to stop before turning devices off on the
+/// computer, so several changes restart WirePlumber once.
+const SYSTEM_DEVICES_DELAY: Duration = Duration::from_millis(1500);
+/// How long devices come and go after WirePlumber restarts.
+const WIREPLUMBER_SETTLE: Duration = Duration::from_secs(6);
 /// `application.id` of LinuxLink's own streams, to tell them from apps.
 pub const STREAM_TAG: &str = "linuxlink";
 
@@ -181,6 +195,9 @@ struct Engine {
     /// Fed Bluetooth outputs found not running, and on how many checks in a row.
     bt_stalls: HashMap<String, u32>,
     bt_reconnects: HashMap<String, Reconnect>,
+    /// Bluetooth outputs given a new loopback: since when they wait for
+    /// their restart, or (once done) when it happened.
+    bt_restarts: HashMap<String, (Instant, bool)>,
     /// Installed apps, to name the apps playing audio.
     app_index: crate::apps::AppIndex,
     /// Volume and mute of each input device, as of the last refresh.
@@ -189,6 +206,12 @@ struct Engine {
     /// removed devices (see `guard_inputs`).
     guard_until: Option<Instant>,
     listen_switches: u64,
+    /// Devices the WirePlumber rule turns off, as last applied (see
+    /// `sync_system_devices`), and a change waiting for toggles to stop.
+    system_disabled: Option<BTreeSet<String>>,
+    system_pending: Option<(BTreeSet<String>, Instant)>,
+    /// Until when WirePlumber is recreating devices after a restart.
+    wireplumber_settling: Option<Instant>,
     /// Voice ducking: level probes on the key channels, keyed by source.
     duck_probes: HashMap<String, Probe>,
     ducker: Ducker,
@@ -202,6 +225,30 @@ fn node_state(info: &str) -> Option<&str> {
     info.lines().find_map(|l| {
         l.trim_start_matches(['*', ' ', '\t']).strip_prefix("state:")?.trim().strip_prefix('"')?.split('"').next()
     })
+}
+
+/// The BlueZ audio transport of a Bluetooth output: its D-Bus object among
+/// the paths `busctl --list tree org.bluez` prints.
+fn transport_path<'a>(tree: &'a str, sink: &str) -> Option<&'a str> {
+    let addr = sink.strip_prefix("bluez_output.")?.split('.').next()?;
+    let dev = format!("/dev_{addr}/");
+    tree.lines().map(str::trim).find(|p| {
+        p.split_once(&dev).is_some_and(|(_, rest)| rest.split('/').next_back().is_some_and(|n| n.starts_with("fd")))
+    })
+}
+
+/// Whether BlueZ is streaming to a Bluetooth output ("idle", "pending" or
+/// "active"), if it can be asked.
+fn transport_state(sink: &str) -> Option<String> {
+    let busctl = |args: &[&str]| {
+        let out = crate::sys::host_command("busctl").args(args).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    let tree = busctl(&["--list", "tree", "org.bluez"])?;
+    let path = transport_path(&tree, sink)?;
+    let state = busctl(&["get-property", "org.bluez", path, "org.bluez.MediaTransport1", "State"])?;
+    // `s "active"`
+    Some(state.trim().strip_prefix("s ")?.trim_matches('"').to_string())
 }
 
 /// A Bluetooth output LinuxLink had to reconnect, and when it may try again.
@@ -452,6 +499,9 @@ impl Engine {
                 outputs.iter().filter(|o| !rt.outputs.contains_key(*o) && !cooling(o)).collect();
             for out in missing {
                 let l = self.try_loop(&mix_capture(&mix.id), out, &format!("LinuxLink {} output", mix.name));
+                if l.module.is_some() && is_bluetooth(out) {
+                    self.bt_restarts.insert(out.clone(), (now, false));
+                }
                 self.mixes.get_mut(&mix.id).unwrap().outputs.insert(out.clone(), l);
                 changed = true;
             }
@@ -562,7 +612,7 @@ impl Engine {
     /// system's previous output while that device is disconnected.
     fn listen_target(&self) -> Option<String> {
         let wanted = self.cfg.listen_output.clone()?;
-        if self.known_sinks.is_empty() || self.known_sinks.contains(&wanted) {
+        if self.known_sinks.is_empty() || self.known_sinks.contains(&wanted) || self.settling() {
             return Some(wanted);
         }
         self.fallback_output().or(Some(wanted))
@@ -593,13 +643,52 @@ impl Engine {
         }
     }
 
+    /// The PipeWire state of an output: "running", "idle", "error"...
+    fn sink_state(&self, name: &str) -> Option<String> {
+        let id = self.node_ids.get(name)?;
+        let out = crate::sys::host_command("pw-cli").args(["info", &id.to_string()]).output().ok()?;
+        node_state(&String::from_utf8_lossy(&out.stdout)).map(str::to_string)
+    }
+
+    /// A Bluetooth output only works if it starts under the clock it will
+    /// keep. WirePlumber links the two ends of a loopback in no set order:
+    /// when the headset's end comes first, the headset starts as its own
+    /// clock, is handed to the mixes' clock (the microphone's, typically) a
+    /// moment later, and from then on gets no audio; after ~3 s it gives up
+    /// ("Failure in Bluetooth audio transport"). So once a new loopback has
+    /// settled, suspend the headset: PipeWire starts it again right away,
+    /// this time inside the finished graph. Wait until its transport is up,
+    /// though: releasing it halfway through makes the next start fail.
+    fn restart_bluetooth(&mut self) {
+        let now = Instant::now();
+        for (name, (since, done)) in &mut self.bt_restarts {
+            let waited = now - *since;
+            if *done || waited < BT_RESTART_AFTER {
+                continue;
+            }
+            let ready = match transport_state(name) {
+                Some(state) => state == "active",
+                None => waited >= BT_RESTART_BLIND,
+            };
+            if ready {
+                *done = true;
+                *since = now;
+                if let Err(e) = pactl::suspend_sink(name, true) {
+                    eprintln!("linuxlink: restarting {name}: {e:#}");
+                }
+            }
+        }
+        self.bt_restarts.retain(|_, (since, done)| now - *since < if *done { BT_SETTLE } else { BT_RESTART_GIVE_UP });
+    }
+
     /// Bluetooth outputs sometimes fail when streams start or stop ("Failure
-    /// in Bluetooth audio transport"), most often right as LinuxLink starts.
-    /// Afterwards they either sit in the error state or quietly stop running,
-    /// and stay silent until something reconnects to them. A device LinuxLink
-    /// feeds should always be running, so reconnect any that isn't: drop the
-    /// loopback, give the headset a moment to restart, then connect again
-    /// (backing off if it keeps failing).
+    /// in Bluetooth audio transport"), most often in the first seconds after
+    /// a headset connects or LinuxLink starts. Afterwards they either sit in
+    /// the error state or quietly stop running, and stay silent until
+    /// something reconnects to them. A device LinuxLink feeds should always
+    /// be running, so reconnect any that isn't: drop the loopback, let the
+    /// headset release its transport, then connect again (backing off if it
+    /// keeps failing).
     fn heal_bluetooth(&mut self) {
         let fed: HashSet<String> = self
             .mixes
@@ -610,10 +699,11 @@ impl Engine {
         self.bt_stalls.retain(|n, _| fed.contains(n));
         let now = Instant::now();
         for name in fed {
-            let Some(id) = self.node_ids.get(&name) else { continue };
-            let Ok(out) = crate::sys::host_command("pw-cli").args(["info", &id.to_string()]).output() else { continue };
-            let info = String::from_utf8_lossy(&out.stdout);
-            let state = node_state(&info).unwrap_or("unknown").to_string();
+            // Being restarted (see `restart_bluetooth`): not running for a moment.
+            if self.bt_restarts.contains_key(&name) {
+                continue;
+            }
+            let Some(state) = self.sink_state(&name) else { continue };
             let failed = state == "error";
             let stalled = matches!(state.as_str(), "idle" | "suspended");
             if !failed && !stalled {
@@ -651,19 +741,33 @@ impl Engine {
                 }
             }
             if failed {
-                // Suspending the device clears its error state.
+                // Suspending the device releases its Bluetooth transport,
+                // which clears the error; the new loopback wakes it again.
+                // Resuming it right away instead restarts the failed
+                // transport, and the device stays in error for good.
                 let _ = pactl::suspend_sink(&name, true);
-                std::thread::sleep(Duration::from_millis(300));
-                let _ = pactl::suspend_sink(&name, false);
             }
         }
-        // Reconnect the ones whose wait is over.
-        for (name, r) in &mut self.bt_reconnects {
-            if r.waiting && now >= r.not_before {
-                r.waiting = false;
-                eprintln!("linuxlink: reconnecting {name}");
-                self.needs_sync = true;
+        // Reconnect the ones whose wait is over, unless the device is still
+        // in error: a loopback can't link to it then, so give it longer.
+        let due: Vec<String> = self
+            .bt_reconnects
+            .iter()
+            .filter(|(_, r)| r.waiting && now >= r.not_before)
+            .map(|(n, _)| n.clone())
+            .collect();
+        for name in due {
+            let in_error = self.sink_state(&name).as_deref() == Some("error");
+            let r = self.bt_reconnects.get_mut(&name).unwrap();
+            if in_error {
+                r.not_before = now + Duration::from_secs(1);
+                eprintln!("linuxlink: {name} is still in error; waiting before reconnecting");
+                let _ = pactl::suspend_sink(&name, true);
+                continue;
             }
+            r.waiting = false;
+            eprintln!("linuxlink: reconnecting {name}");
+            self.needs_sync = true;
         }
     }
 
@@ -693,10 +797,13 @@ impl Engine {
             self.bluetooth.retain(|n| hardware.contains(n));
             self.bluetooth.extend(connected.iter().cloned());
             self.known_sinks = hardware;
-            if let Some(headset) = connected.last().filter(|_| !first_look) {
+            // While WirePlumber restarts, every device goes and comes back:
+            // that's no reason to change where you listen.
+            let settling = self.settling();
+            if let Some(headset) = connected.last().filter(|_| !first_look && !settling) {
                 // A Bluetooth headset that just connected is what you want to hear.
                 self.switch_listening(headset.clone());
-            } else if self.cfg.listen_output.as_ref().is_some_and(|o| !self.known_sinks.contains(o)) {
+            } else if !settling && self.cfg.listen_output.as_ref().is_some_and(|o| !self.known_sinks.contains(o)) {
                 // Your listening device went away: carry on with the next best.
                 if let Some(next) = self.fallback_output() {
                     self.switch_listening(next);
@@ -729,7 +836,7 @@ impl Engine {
         // You picked another output (e.g. in the volume applet) while
         // LinuxLink owns the default: listen there, and route apps through
         // LinuxLink again.
-        if let Some(Some(ours)) = &self.applied_default {
+        if let (false, Some(Some(ours))) = (self.settling(), &self.applied_default) {
             if let Ok(current) = pactl::default_sink() {
                 if current != *ours && !is_ours(&current) && self.known_sinks.contains(&current) {
                     self.cfg.listen_output = Some(current);
@@ -932,6 +1039,51 @@ impl Engine {
         changed || moved
     }
 
+    fn settling(&self) -> bool {
+        self.wireplumber_settling.is_some_and(|t| Instant::now() < t)
+    }
+
+    /// Turns hidden devices off (or back on) for the whole computer once
+    /// you've stopped toggling them; see `system_devices`.
+    fn sync_system_devices(&mut self) {
+        let now = Instant::now();
+        if self.wireplumber_settling.is_some_and(|t| now >= t) {
+            self.wireplumber_settling = None;
+            // Devices are back: restore LinuxLink's default output, and
+            // carry on elsewhere if your listening device didn't return.
+            self.applied_default = None;
+            self.needs_sync = true;
+            if self.cfg.listen_output.as_ref().is_some_and(|o| !self.known_sinks.contains(o)) {
+                if let Some(next) = self.fallback_output() {
+                    self.switch_listening(next);
+                }
+            }
+        }
+        let want = self.cfg.system_disabled();
+        if self.system_disabled.as_ref() == Some(&want) {
+            self.system_pending = None;
+            return;
+        }
+        match &self.system_pending {
+            Some((pending, since)) if *pending == want => {
+                if now - *since < SYSTEM_DEVICES_DELAY {
+                    return;
+                }
+            }
+            _ => {
+                self.system_pending = Some((want, now));
+                return;
+            }
+        }
+        self.system_pending = None;
+        match crate::system_devices::apply(&want) {
+            Ok(true) => self.wireplumber_settling = Some(Instant::now() + WIREPLUMBER_SETTLE),
+            Ok(false) => {}
+            Err(e) => self.report(e),
+        }
+        self.system_disabled = Some(want);
+    }
+
     fn save_if_due(&mut self) {
         if self.dirty_since.is_some_and(|t| t.elapsed() > Duration::from_millis(300)) {
             self.dirty_since = None;
@@ -942,6 +1094,19 @@ impl Engine {
     }
 
     fn shutdown(&mut self) {
+        // Silence the mixes before unplugging their outputs: cutting a
+        // loopback off mid-stream (or moving apps onto the device while it
+        // still plays) comes out of Bluetooth headsets as a loud burst.
+        for id in self.mixes.keys() {
+            let _ = pactl::set_sink_mute(&mix_sink(id), true);
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        for rt in self.mixes.values_mut() {
+            for (_, l) in rt.outputs.drain() {
+                l.unload();
+            }
+        }
+
         // Leave the system output on the device you were listening on.
         let target = self.listen_target().filter(|t| !t.is_empty()).unwrap_or_else(|| self.prev_default.clone());
         if !target.is_empty() {
@@ -1039,6 +1204,10 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
         refreshes: 0,
         bt_stalls: HashMap::new(),
         bt_reconnects: HashMap::new(),
+        bt_restarts: HashMap::new(),
+        system_disabled: None,
+        system_pending: None,
+        wireplumber_settling: None,
         app_index: crate::apps::AppIndex::load(),
         input_levels: HashMap::new(),
         guard_until: None,
@@ -1113,12 +1282,14 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
                     }
                     last_refresh = Some(Instant::now());
                 }
+                engine.restart_bluetooth();
                 engine.update_ducking();
                 engine.reconcile_levels();
                 if let Ok(mut snap) = engine.snapshot.try_lock() {
                     snap.ducking_db = engine.duck_db;
                 }
                 engine.save_if_due();
+                engine.sync_system_devices();
             }
         })
         .expect("spawning engine thread");
@@ -1128,7 +1299,20 @@ pub fn spawn(cfg: Config, defaults: Defaults) -> Arc<EngineHandle> {
 
 #[cfg(test)]
 mod tests {
-    use super::node_state;
+    use super::{node_state, transport_path};
+
+    #[test]
+    fn finds_the_bluez_transport_of_an_output() {
+        let tree = "/\n/org/bluez\n/org/bluez/hci0\n/org/bluez/hci0/dev_EC_E9_D2_25_E2_CA\n\
+                    /org/bluez/hci0/dev_EC_E9_D2_25_E2_CA/sep1\n/org/bluez/hci0/dev_EC_E9_D2_25_E2_CA/sep2/fd3\n\
+                    /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF/fd0\n";
+        let sink = "bluez_output.EC_E9_D2_25_E2_CA.1";
+        assert_eq!(transport_path(tree, sink), Some("/org/bluez/hci0/dev_EC_E9_D2_25_E2_CA/sep2/fd3"));
+        let direct = "/org/bluez/hci1/dev_EC_E9_D2_25_E2_CA/fd0\n";
+        assert_eq!(transport_path(direct, sink), Some("/org/bluez/hci1/dev_EC_E9_D2_25_E2_CA/fd0"));
+        assert_eq!(transport_path(tree, "bluez_output.11_22_33_44_55_66.1"), None);
+        assert_eq!(transport_path(tree, "alsa_output.pci"), None);
+    }
 
     #[test]
     fn reads_node_state_from_pw_cli_output() {

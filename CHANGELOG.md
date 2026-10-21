@@ -9,6 +9,23 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+### Added
+
+- **Turn devices off for the whole computer.** In **Settings**, turn on
+  **Turn them off on this computer too** and the devices you switch off
+  disappear from your system's sound settings and other apps, not just from
+  LinuxLink. Switch them back on in the same place.
+
+### Fixed
+
+- **Bluetooth headsets play right away.** After connecting a headset, or
+  starting LinuxLink with one already connected, it often stayed silent
+  until you picked another output and back, or even reconnected the
+  headset. LinuxLink now restarts the headset once its stream is set up,
+  so it plays first time, and recovers properly if it still fails.
+- **Quieter quit.** LinuxLink mutes its mixes before taking them apart, so
+  quitting doesn't send a burst through your headphones.
+
 ## [0.2.0] - 2026-10-18
 
 LinuxLink now behaves like Wave Link 3 down to its numbers: faders, voice

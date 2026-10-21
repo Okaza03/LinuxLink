@@ -20,7 +20,7 @@ use eframe::egui::{
     self, pos2, vec2, Align, Align2, Color32, ComboBox, CornerRadius, FontFamily, FontId, Frame, Id, Layout, Margin,
     Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -809,7 +809,24 @@ impl LinuxLinkApp {
     }
 
     fn device_settings(&mut self, ui: &mut Ui, snap: &Snapshot) {
-        let note = "Turned-off devices are hidden from LinuxLink. Other apps can still use them.";
+        group_heading(ui, "Turned-off devices");
+        settings_row(
+            ui,
+            "Turn them off on this computer too",
+            "Turned-off sound-card devices also disappear from your system's sound settings and other \
+             apps. Applying a change restarts the system's audio service, so sound drops out for a \
+             moment. Devices LinuxLink uses and Bluetooth devices are only hidden from LinuxLink.",
+            |ui| {
+                toggle(ui, &mut self.cfg.disable_hidden_on_system);
+            },
+        );
+        let note = if self.cfg.disable_hidden_on_system {
+            "Turned-off devices are hidden from LinuxLink, and sound cards from the whole computer."
+        } else {
+            "Turned-off devices are hidden from LinuxLink. Other apps can still use them."
+        };
+        let system_off = self.cfg.system_disabled();
+        ui.add_space(14.0);
         group_heading(ui, "Input devices");
         ui.label(RichText::new(note).small().color(p().text_dim));
         ui.add_space(4.0);
@@ -827,7 +844,14 @@ impl LinuxLinkApp {
                 row_divider(ui);
             }
             let note = if used.contains(&d.name) { "In use by a channel" } else { "" };
-            device_toggle_row(ui, d, note, &mut self.cfg.hidden_inputs);
+            device_toggle_row(ui, d, note, &mut self.cfg.hidden_inputs, &mut self.cfg.hidden_labels);
+        }
+        let missing = missing_devices(&self.cfg.hidden_inputs, &snap.inputs);
+        for (i, name) in missing.iter().enumerate() {
+            if i > 0 || !snap.inputs.is_empty() {
+                row_divider(ui);
+            }
+            missing_device_row(ui, name, &system_off, &mut self.cfg.hidden_inputs, &mut self.cfg.hidden_labels);
         }
         ui.add_space(14.0);
         group_heading(ui, "Output devices");
@@ -844,7 +868,14 @@ impl LinuxLinkApp {
             } else {
                 ""
             };
-            device_toggle_row(ui, d, note, &mut self.cfg.hidden_outputs);
+            device_toggle_row(ui, d, note, &mut self.cfg.hidden_outputs, &mut self.cfg.hidden_labels);
+        }
+        let missing = missing_devices(&self.cfg.hidden_outputs, &snap.outputs);
+        for (i, name) in missing.iter().enumerate() {
+            if i > 0 || !snap.outputs.is_empty() {
+                row_divider(ui);
+            }
+            missing_device_row(ui, name, &system_off, &mut self.cfg.hidden_outputs, &mut self.cfg.hidden_labels);
         }
     }
 
@@ -2501,15 +2532,52 @@ fn row_divider(ui: &mut Ui) {
 }
 
 /// One device with an on/off switch; off hides it from LinuxLink.
-fn device_toggle_row(ui: &mut Ui, d: &crate::pactl::Device, note: &str, hidden: &mut BTreeSet<String>) {
+fn device_toggle_row(
+    ui: &mut Ui,
+    d: &crate::pactl::Device,
+    note: &str,
+    hidden: &mut BTreeSet<String>,
+    labels: &mut BTreeMap<String, String>,
+) {
+    // Remember the name of a turned-off device, to list it once it's gone.
+    if hidden.contains(&d.name) && labels.get(&d.name) != Some(&d.description) {
+        labels.insert(d.name.clone(), d.description.clone());
+    }
     settings_row(ui, &d.description, note, |ui| {
         let mut on = !hidden.contains(&d.name);
         if toggle(ui, &mut on).changed() {
             if on {
                 hidden.remove(&d.name);
+                labels.remove(&d.name);
             } else {
                 hidden.insert(d.name.clone());
+                labels.insert(d.name.clone(), d.description.clone());
             }
+        }
+    });
+}
+
+/// Turned-off devices PipeWire doesn't list right now.
+fn missing_devices(hidden: &BTreeSet<String>, present: &[crate::pactl::Device]) -> Vec<String> {
+    hidden.iter().filter(|n| !present.iter().any(|d| &d.name == *n)).cloned().collect()
+}
+
+/// A turned-off device that's gone from PipeWire (turned off on the
+/// computer, or not connected), so it can still be turned back on.
+fn missing_device_row(
+    ui: &mut Ui,
+    name: &str,
+    system_off: &BTreeSet<String>,
+    hidden: &mut BTreeSet<String>,
+    labels: &mut BTreeMap<String, String>,
+) {
+    let title = labels.get(name).cloned().unwrap_or_else(|| name.to_string());
+    let note = if system_off.contains(name) { "Turned off on this computer" } else { "Not connected" };
+    settings_row(ui, &title, note, |ui| {
+        let mut on = false;
+        if toggle(ui, &mut on).changed() {
+            hidden.remove(name);
+            labels.remove(name);
         }
     });
 }

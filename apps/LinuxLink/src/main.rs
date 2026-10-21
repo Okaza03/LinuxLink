@@ -9,6 +9,7 @@ mod levels;
 mod meter;
 mod pactl;
 mod sys;
+mod system_devices;
 mod tray;
 mod ui;
 mod updater;
@@ -30,6 +31,12 @@ fn main() -> anyhow::Result<()> {
     if args.iter().any(|a| a == "--cleanup") {
         engine::cleanup_stale();
         println!("Removed leftover LinuxLink devices.");
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--restore-devices") {
+        if system_devices::apply(&Default::default())? {
+            println!("Turned devices back on that {APP_NAME} had turned off on this computer.");
+        }
         return Ok(());
     }
 

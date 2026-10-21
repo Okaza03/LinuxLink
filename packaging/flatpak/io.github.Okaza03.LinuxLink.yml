@@ -34,6 +34,8 @@ finish-args:
   - --filesystem=xdg-data/flatpak/exports/share:ro
   - --filesystem=/var/lib/flatpak/exports/share:ro
   - --filesystem=xdg-config/kdeglobals:ro
+  # Turning devices off for the whole computer (a WirePlumber rule).
+  - --filesystem=xdg-config/wireplumber:create
   # "Start with your computer".
   - --filesystem=xdg-config/autostart:create
   # Downloaded updates.
