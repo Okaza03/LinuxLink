@@ -9,6 +9,18 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-21
+
+Bluetooth headsets stay in stereo when you turn devices off.
+
+### Fixed
+
+- **Bluetooth headsets no longer drop to mono.** Turning devices off for
+  the whole computer restarts the system's audio service, and a connected
+  Bluetooth headset came back in its call mode: mono, much quieter, and on
+  some headsets with weaker noise cancelling. LinuxLink now puts headsets
+  back in high-quality stereo afterwards.
+
 ## [0.3.0] - 2026-10-21
 
 Bluetooth headsets now play the moment they connect, and devices you never
