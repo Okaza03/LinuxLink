@@ -131,6 +131,41 @@ fn devices(kind: &str) -> Result<Vec<Device>> {
         .collect())
 }
 
+/// A sound card (a Bluetooth headset is one too) and its profiles.
+#[derive(Debug, Clone)]
+pub struct Card {
+    pub name: String,
+    pub active_profile: String,
+    /// Profiles it can switch to right now.
+    pub profiles: Vec<String>,
+    /// A Bluetooth headset's BlueZ device, e.g. `/org/bluez/hci0/dev_58_18_62_1F_22_03`.
+    pub bluez_path: Option<String>,
+}
+
+pub fn cards() -> Result<Vec<Card>> {
+    Ok(list_json("cards")?
+        .iter()
+        .filter_map(|c| {
+            let profiles = c.get("profiles").and_then(Value::as_object).map_or_else(Vec::new, |p| {
+                p.iter()
+                    .filter(|(_, v)| v.get("available").and_then(Value::as_bool) != Some(false))
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            });
+            Some(Card {
+                name: c.get("name")?.as_str()?.to_string(),
+                active_profile: c.get("active_profile").and_then(Value::as_str).unwrap_or_default().to_string(),
+                profiles,
+                bluez_path: c.pointer("/properties/api.bluez5.path").and_then(Value::as_str).map(str::to_string),
+            })
+        })
+        .collect())
+}
+
+pub fn set_card_profile(card: &str, profile: &str) -> Result<()> {
+    run(&["set-card-profile", card, profile]).map(drop)
+}
+
 pub fn sinks() -> Result<Vec<Device>> {
     devices("sinks")
 }

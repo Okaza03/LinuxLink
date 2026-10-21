@@ -6,10 +6,21 @@
 //!
 //! Only sound-card (ALSA) devices can be turned off this way; WirePlumber
 //! has no rule for a single Bluetooth output.
+//!
+//! A restart drops Bluetooth headsets' stereo (A2DP) connection, and they
+//! come back on the mono headset (HFP) profile: quiet, 16 kHz, and on some
+//! headsets with weaker noise cancelling. So the restart puts each headset
+//! back on the profile it had (see `restore_bluetooth`).
 
 use anyhow::{bail, Context, Result};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+/// The A2DP sink service, to reconnect a headset's stereo connection.
+const A2DP_SINK_UUID: &str = "0000110b-0000-1000-8000-00805f9b34fb";
+/// How long to wait for headsets to return after WirePlumber restarts.
+const BLUETOOTH_RETURN: Duration = Duration::from_secs(10);
 
 /// Whether `name` is a device a WirePlumber rule can turn off.
 pub fn can_disable(name: &str) -> bool {
@@ -53,6 +64,7 @@ pub fn apply(names: &BTreeSet<String>) -> Result<bool> {
         None => std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?,
     }
     eprintln!("linuxlink: devices turned off on this computer: {names:?}; restarting WirePlumber");
+    let headsets = bluetooth_profiles();
     let status = crate::sys::host_command("systemctl")
         .args(["--user", "restart", "wireplumber"])
         .status()
@@ -60,7 +72,54 @@ pub fn apply(names: &BTreeSet<String>) -> Result<bool> {
     if !status.success() {
         bail!("couldn't restart WirePlumber; device changes apply after you log in again");
     }
+    restore_bluetooth(&headsets);
     Ok(true)
+}
+
+/// Connected Bluetooth headsets and the profile each is on.
+fn bluetooth_profiles() -> Vec<(String, String)> {
+    crate::pactl::cards()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.bluez_path.is_some() && c.active_profile != "off")
+        .map(|c| (c.name, c.active_profile))
+        .collect()
+}
+
+/// Puts headsets back on the profiles they had before WirePlumber restarted,
+/// reconnecting their stereo (A2DP) connection if it dropped.
+fn restore_bluetooth(saved: &[(String, String)]) {
+    let deadline = Instant::now() + BLUETOOTH_RETURN;
+    let mut pending: Vec<&(String, String)> = saved.iter().collect();
+    let mut reconnected = BTreeSet::new();
+    while !pending.is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(500));
+        let cards = crate::pactl::cards().unwrap_or_default();
+        pending.retain(|(name, profile)| {
+            let Some(card) = cards.iter().find(|c| &c.name == name) else { return true };
+            if &card.active_profile == profile {
+                return false;
+            }
+            if card.profiles.contains(profile) {
+                if let Err(e) = crate::pactl::set_card_profile(name, profile) {
+                    eprintln!("linuxlink: switching {name} back to {profile}: {e:#}");
+                }
+                return true;
+            }
+            // The stereo connection is gone: ask the headset for it again, once.
+            if profile.starts_with("a2dp") && reconnected.insert(name.clone()) {
+                if let Some(path) = &card.bluez_path {
+                    let _ = crate::sys::host_command("busctl")
+                        .args(["call", "org.bluez", path, "org.bluez.Device1", "ConnectProfile", "s", A2DP_SINK_UUID])
+                        .status();
+                }
+            }
+            true
+        });
+    }
+    for (name, profile) in pending {
+        eprintln!("linuxlink: {name} didn't come back on {profile}");
+    }
 }
 
 #[cfg(test)]
