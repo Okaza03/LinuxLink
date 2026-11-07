@@ -50,14 +50,15 @@ every channel. It is modelled on Elgato Wave Link 3 and built on PipeWire.
 
 ## Install
 
-Download the file for your system from the
+Download the file for your system from
+[**the website**](https://okaza03.github.io/LinuxLink/) or the
 [**latest release**](https://github.com/Okaza03/LinuxLink/releases/latest).
 Every release has packages for **x86_64** and **ARM64 (aarch64)**.
 
 | System | File | How to install |
 | --- | --- | --- |
 | **Any distribution** | `LinuxLink-<version>-x86_64.AppImage` | `chmod +x LinuxLink-*.AppImage` and run it. Updates itself. |
-| **Any distribution** | `LinuxLink-<version>-x86_64.flatpak` | `flatpak install --user LinuxLink-*.flatpak` (or open it in Discover / GNOME Software) |
+| **Any distribution** | Flatpak | `flatpak install --user https://okaza03.github.io/LinuxLink/linuxlink.flatpakref`, or the `LinuxLink-<version>-x86_64.flatpak` bundle. Updates with `flatpak update`. |
 | **Debian, Ubuntu, Mint, Pop!_OS** | `linuxlink_<version>_amd64.deb` | `sudo apt install ./linuxlink_*.deb` |
 | **Fedora, openSUSE, RHEL** | `linuxlink-<version>-1.x86_64.rpm` | `sudo dnf install ./linuxlink-*.rpm` (openSUSE: `sudo zypper install ./linuxlink-*.rpm`) |
 | **Arch, CachyOS, EndeavourOS, Manjaro** | `linuxlink-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U linuxlink-*.pkg.tar.zst`, or build [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD) |

@@ -52,7 +52,9 @@ def main() -> None:
         "### How to install",
         "",
         "- **AppImage:** `chmod +x LinuxLink-*.AppImage`, then run it.",
-        "- **Flatpak:** `flatpak install --user LinuxLink-*.flatpak`, or open the file in Discover / GNOME Software.",
+        "- **Flatpak:** `flatpak install --user https://okaza03.github.io/LinuxLink/linuxlink.flatpakref` adds LinuxLink's "
+        "repository and installs it, so `flatpak update` keeps it current. Or `flatpak install --user LinuxLink-*.flatpak`, "
+        "or open the file in Discover / GNOME Software.",
         "- **Debian / Ubuntu:** `sudo apt install ./linuxlink_*.deb`",
         "- **Fedora:** `sudo dnf install ./linuxlink-*.rpm` (openSUSE: `sudo zypper install ./linuxlink-*.rpm`)",
         "- **Arch:** `sudo pacman -U linuxlink-*.pkg.tar.zst`",

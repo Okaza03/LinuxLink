@@ -9,6 +9,19 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-07
+
+LinuxLink has a website, and its own Flatpak repository for `flatpak update`.
+
+### Added
+
+- **A website and a Flatpak repository** at
+  <https://okaza03.github.io/LinuxLink/>. Install with
+  `flatpak install --user https://okaza03.github.io/LinuxLink/linuxlink.flatpakref`
+  and `flatpak update` keeps LinuxLink up to date, on x86_64 and ARM64. The
+  repository is signed, and the release's `.flatpak` bundles now get updates
+  from it too.
+
 ## [0.3.1] - 2026-10-21
 
 Bluetooth headsets stay in stereo when you turn devices off.
@@ -257,7 +270,9 @@ built on PipeWire.
   Flatpak, .deb (Debian, Ubuntu, Mint, Pop!_OS), .rpm (Fedora, openSUSE), an
   Arch Linux package, and a plain tarball.
 
-[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Okaza03/LinuxLink/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/Okaza03/LinuxLink/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Okaza03/LinuxLink/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Okaza03/LinuxLink/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/Okaza03/LinuxLink/compare/v0.1.2...v0.1.3

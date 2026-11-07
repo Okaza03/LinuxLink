@@ -42,16 +42,33 @@ the menu entry.)
 
 ## Flatpak (any distribution)
 
+LinuxLink has its own Flatpak repository at
+<https://okaza03.github.io/LinuxLink/>. One command adds it for your user and
+installs LinuxLink, for x86_64 or ARM64:
+
 ```sh
-flatpak install --user LinuxLink-<version>-x86_64.flatpak
+flatpak install --user https://okaza03.github.io/LinuxLink/linuxlink.flatpakref
 flatpak run io.github.Okaza03.LinuxLink
 ```
 
-You can also open the file in Discover or GNOME Software. The bundle fetches
-the Freedesktop runtime from Flathub if you don't have it yet.
+Or add the repository by hand (Flathub provides the runtime) and install by
+name:
 
-**Updates:** the update button downloads the new `.flatpak` to ~/Downloads and
-opens it in your software center. **Remove:**
+```sh
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak remote-add --user --if-not-exists linuxlink https://okaza03.github.io/LinuxLink/linuxlink.flatpakrepo
+flatpak install --user linuxlink io.github.Okaza03.LinuxLink
+```
+
+Every release also has a bundle, `LinuxLink-<version>-x86_64.flatpak`, for
+`flatpak install --user LinuxLink-*.flatpak` or to open in Discover or GNOME
+Software. A copy installed from the bundle gets updates from the same
+repository. The repository and the bundles are signed, and flatpak checks
+every update against that key.
+
+**Updates:** `flatpak update`, or your software center. The update button in
+the app downloads the new `.flatpak` to ~/Downloads and opens it in your
+software center. **Remove:**
 `flatpak uninstall io.github.Okaza03.LinuxLink`.
 
 LinuxLink's job is to reconfigure your whole session's audio, so the Flatpak
