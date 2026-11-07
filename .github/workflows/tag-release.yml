@@ -1,0 +1,49 @@
+# Merging a release pull request (branch release-X.Y.Z) tags the merge as
+# vX.Y.Z and starts the release workflow on that tag.
+#
+# A tag pushed with the workflow's own token doesn't trigger other workflows
+# (GitHub's rule against loops), so the release is started explicitly. Its
+# ref is still refs/tags/vX.Y.Z, so it runs exactly as for a pushed tag.
+#
+# Every other pull request shows this workflow as skipped; that's expected.
+name: Tag release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write # push the tag
+  actions: write # start the release workflow
+
+jobs:
+  tag:
+    name: Tag and start the release
+    # Merged, from a release branch in this repository (not a fork).
+    if: >-
+      github.event.pull_request.merged &&
+      startsWith(github.event.pull_request.head.ref, 'release-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - name: Tag the merge
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          [ "$BRANCH" = "release-$V" ] \
+            || { echo "Branch $BRANCH doesn't match the version in Cargo.toml ($V)"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/v$V" > /dev/null; then
+            echo "v$V is already tagged"; exit 1
+          fi
+          git tag "v$V"
+          git push origin "v$V"
+          echo "TAG=v$V" >> "$GITHUB_ENV"
+      - name: Start the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"

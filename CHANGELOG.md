@@ -9,6 +9,15 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+### Added
+
+- **A website and a Flatpak repository** at
+  <https://okaza03.github.io/LinuxLink/>. Install with
+  `flatpak install --user https://okaza03.github.io/LinuxLink/linuxlink.flatpakref`
+  and `flatpak update` keeps LinuxLink up to date, on x86_64 and ARM64. The
+  repository is signed, and the release's `.flatpak` bundles now get updates
+  from it too.
+
 ## [0.3.1] - 2026-10-21
 
 Bluetooth headsets stay in stereo when you turn devices off.

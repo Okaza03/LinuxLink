@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinuxLink: mix and route your audio on Linux</title>
+<meta name="description" content="LinuxLink splits your audio into channels and builds independent mixes from them, like Elgato Wave Link, on Linux. Built on PipeWire, for x86_64 and ARM64.">
+<meta property="og:title" content="LinuxLink">
+<meta property="og:description" content="Mix and route your audio like Wave Link, on Linux.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="@BASE@/">
+<link rel="icon" href="linuxlink.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #121317;
+    --bg-deep: #0b0c0f;
+    --surface: #1a1c22;
+    --surface-hi: #22242b;
+    --line: #2c2d33;
+    --line-hi: #565860;
+    --text: #ececee;
+    --muted: #8b8d94;
+    --accent: #4cc2ff;
+    --accent-hi: #7fd3ff;
+    --on-accent: #06141c;
+    --meter: #3bb455;
+    --meter-hi: #fddb01;
+    --radius: 14px;
+    --max: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", "Noto Sans", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  code, pre {
+    font-family: ui-monospace, "Noto Sans Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+  }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 24px; }
+  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+  /* ---- top bar */
+  header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(18, 19, 23, 0.82);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  header.top .wrap { display: flex; align-items: center; gap: 28px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+  .brand img { width: 30px; height: 30px; }
+  .brand span { font-weight: 700; font-size: 19px; letter-spacing: -0.01em; color: #fff; }
+  nav.links { display: flex; gap: 22px; margin-left: auto; font-size: 15px; }
+  nav.links a { text-decoration: none; color: var(--muted); }
+  nav.links a:hover { color: var(--text); }
+  @media (max-width: 640px) { nav.links a.opt { display: none; } }
+
+  /* ---- buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 22px; border-radius: 999px;
+    font-weight: 650; font-size: 15px; text-decoration: none;
+    border: 1px solid transparent; cursor: pointer;
+    transition: background .15s, border-color .15s, transform .15s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.primary { background: var(--accent); color: var(--on-accent); }
+  .btn.primary:hover { background: var(--accent-hi); }
+  .btn.ghost { border-color: var(--line-hi); color: var(--text); }
+  .btn.ghost:hover { background: var(--surface-hi); }
+  .btn svg { width: 18px; height: 18px; }
+
+  /* ---- hero */
+  .hero { position: relative; overflow: hidden; padding: 88px 0 56px; }
+  .hero::before {
+    content: ""; position: absolute; inset: -40% -10% auto -10%; height: 120%;
+    background:
+      radial-gradient(600px 360px at 18% 30%, rgba(76, 194, 255, 0.18), transparent 70%),
+      radial-gradient(520px 320px at 85% 10%, rgba(59, 180, 85, 0.13), transparent 70%);
+    pointer-events: none;
+  }
+  .hero .wrap { position: relative; display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; align-items: center; }
+  @media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; gap: 44px; } .hero { padding-top: 56px; } }
+  .eyebrow {
+    display: inline-block; font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent-hi); border: 1px solid rgba(76, 194, 255, .4);
+    padding: 4px 12px; border-radius: 999px; margin-bottom: 22px;
+  }
+  .hero h1 { font-size: clamp(38px, 5.4vw, 60px); line-height: 1.05; margin: 0 0 20px; letter-spacing: -0.02em; }
+  .hero h1 em { font-style: normal; color: var(--accent-hi); }
+  .hero p.lead { font-size: 19px; color: #c4c5ca; margin: 0 0 30px; max-width: 34em; }
+  .hero .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 26px; }
+  .platforms { color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .platforms span::before { content: "●"; color: var(--accent); margin-right: 8px; font-size: 9px; vertical-align: 2px; }
+
+  /* ---- illustrated mixer window (shapes, not a screenshot) */
+  .window {
+    border-radius: 12px; border: 1px solid var(--line-hi); background: var(--bg-deep);
+    box-shadow: 0 40px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.02) inset;
+    overflow: hidden; transform: perspective(1400px) rotateY(-6deg) rotateX(2deg);
+  }
+  @media (max-width: 900px) { .window { transform: none; } }
+  .window .bar { height: 34px; display: flex; align-items: center; gap: 14px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
+  .window .bar .w { width: 64px; height: 9px; background: #e8e8ea; border-radius: 2px; opacity: .9; }
+  .window .bar .out { margin-left: auto; width: 96px; height: 16px; border: 1px solid var(--line); border-radius: 4px; }
+  .window .mix { display: grid; grid-template-columns: 92px 1fr 1fr; gap: 8px; padding: 12px 14px 16px; }
+  .window .col { height: 30px; border-radius: 6px; background: var(--surface); display: flex; align-items: center; gap: 8px; padding: 0 10px; }
+  .window .col .hp { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent); }
+  .window .col .hp.off { border-color: var(--line-hi); }
+  .window .col i { display: block; width: 52px; height: 7px; border-radius: 3px; background: var(--line-hi); }
+  .window .ch { height: 52px; border-radius: 6px; background: var(--surface); display: flex; align-items: center; gap: 8px; padding: 0 9px; }
+  .window .ch .ico { width: 20px; height: 20px; border-radius: 5px; flex: none; }
+  .window .ch i { display: block; width: 44px; height: 6px; border-radius: 3px; background: var(--muted); }
+  .window .cell { height: 52px; border-radius: 6px; background: var(--surface); padding: 12px 12px 0; }
+  .window .cell.empty { background: #15171c; display: grid; place-items: center; padding: 0; color: var(--line-hi); font-size: 18px; }
+  .window .fader { position: relative; height: 6px; border-radius: 3px; background: #3e3e3e; }
+  .window .fader b { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+  .window .fader s { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #fff; }
+  .window .meter { height: 4px; margin-top: 11px; border-radius: 2px; background: #26282e; overflow: hidden; }
+  .window .meter b { display: block; height: 100%; background: linear-gradient(90deg, var(--meter) 70%, var(--meter-hi)); }
+  .window .cell.muted .fader b { background: #e0203a; }
+  .window .cell.muted { background: #2a1d21; }
+  .c1 { background: linear-gradient(160deg, #3dc6a8, #165447); }
+  .c2 { background: linear-gradient(160deg, #a8573d, #4a2216); }
+  .c3 { background: linear-gradient(160deg, #6c7cf0, #262f6b); }
+  .c4 { background: linear-gradient(160deg, #e8b93a, #6a4c10); }
+
+  /* ---- sections */
+  section { padding: 84px 0; }
+  section.alt { background: var(--bg-deep); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .head { max-width: 720px; margin-bottom: 44px; }
+  .head .kicker { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-hi); margin-bottom: 10px; }
+  .head h2 { font-size: clamp(28px, 3.6vw, 40px); line-height: 1.15; margin: 0 0 14px; letter-spacing: -0.015em; }
+  .head p { color: #b9bac0; margin: 0; font-size: 17px; }
+  .head p a { color: var(--accent-hi); }
+
+  .grid { display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 24px; min-width: 0;
+  }
+  .card .ic {
+    width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center;
+    background: rgba(76, 194, 255, .13); color: var(--accent-hi); margin-bottom: 16px;
+  }
+  .card .ic svg { width: 21px; height: 21px; }
+  .card h3 { margin: 0 0 8px; font-size: 18px; }
+  .card p { margin: 0; color: #b0b1b7; font-size: 15px; }
+
+  /* ---- downloads */
+  .dl { display: grid; gap: 18px; grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 800px) { .dl { grid-template-columns: 1fr; } }
+  .dl .card { display: flex; flex-direction: column; gap: 14px; }
+  .dl .card.wide { grid-column: 1 / -1; }
+  .dl .card h3 { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 20px; }
+  .dl .card h3 svg { width: 26px; height: 26px; color: var(--text); flex: none; }
+  .dl .card h3 small { font-weight: 400; font-size: 14px; color: var(--muted); }
+  .dl .files { display: flex; flex-direction: column; gap: 8px; }
+  .dl .card.wide .files { display: grid; grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 800px) { .dl .card.wide .files { grid-template-columns: 1fr; } }
+  .file {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px;
+    text-decoration: none; background: var(--bg); min-width: 0;
+    transition: border-color .15s, background .15s;
+  }
+  .file:hover { border-color: var(--accent); background: var(--surface-hi); }
+  .file > span:first-child { min-width: 0; }
+  .file b { font-weight: 620; font-size: 15px; }
+  .file small { color: var(--muted); font-size: 13px; display: block; overflow-wrap: anywhere; }
+  .file .arrow { color: var(--muted); flex: none; }
+  .cmd {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 10px 10px 14px; overflow: hidden;
+  }
+  .cmd + .cmd { margin-top: 8px; }
+  .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; color: #d6d7dc; padding: 2px 0; }
+  .copy {
+    flex: none; font: inherit; font-size: 13px; color: var(--text); cursor: pointer;
+    background: var(--surface-hi); border: 1px solid var(--line-hi); border-radius: 7px; padding: 5px 11px;
+  }
+  .copy:hover { border-color: var(--accent); }
+  .note { color: var(--muted); font-size: 14px; margin: 0; }
+  .note a { color: var(--accent-hi); }
+  details { border-top: 1px solid var(--line); padding-top: 12px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  details[open] summary { margin-bottom: 10px; }
+  .version { color: var(--muted); font-size: 14px; margin-top: 18px; }
+  .version a { color: var(--accent-hi); }
+
+  /* ---- get started */
+  .steps { counter-reset: s; display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
+  .steps .card { position: relative; padding-top: 58px; }
+  .steps .card::before {
+    counter-increment: s; content: counter(s);
+    position: absolute; top: 20px; left: 24px; width: 28px; height: 28px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700; font-size: 14px;
+    background: var(--accent); color: var(--on-accent);
+  }
+  pre.block {
+    margin: 14px 0 0; background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; overflow-x: auto; color: #d6d7dc; line-height: 1.55;
+  }
+  .reqs { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+  .reqs td { padding: 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  .reqs td:first-child { white-space: nowrap; padding-right: 12px; color: #d6d7dc; }
+  .reqs td:last-child { color: var(--muted); }
+
+  /* ---- closing */
+  .cta { text-align: center; }
+  .cta img { width: 64px; height: 64px; margin-bottom: 18px; }
+  .cta h2 { font-size: clamp(28px, 3.6vw, 40px); margin: 0 0 12px; }
+  .cta p { color: #b9bac0; margin: 0 0 28px; }
+  .cta .actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+
+  footer { border-top: 1px solid var(--line); padding: 30px 0 40px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+  footer .grow { flex: 1; }
+  footer small { display: block; font-size: 12.5px; opacity: .8; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#" aria-label="LinuxLink home">
+      <img src="linuxlink.svg" alt="">
+      <span>LinuxLink</span>
+    </a>
+    <nav class="links">
+      <a href="#features" class="opt">Features</a>
+      <a href="#download">Download</a>
+      <a href="#start" class="opt">Get started</a>
+      <a href="https://github.com/Okaza03/LinuxLink">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow">Free and open source</span>
+        <h1>Mix and route your audio <em>like Wave Link</em>, on Linux.</h1>
+        <p class="lead">LinuxLink splits your audio into channels, like Music, Games, Voice Chat and your microphone, and builds independent mixes from them: one for your headphones, another for your stream or recording, each with its own volume for every channel. Built on PipeWire.</p>
+        <div class="actions">
+          <a class="btn primary" href="#download">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+            Download LinuxLink
+          </a>
+          <a class="btn ghost" href="https://github.com/Okaza03/LinuxLink">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+            Source on GitHub
+          </a>
+        </div>
+        <div class="platforms">
+          <span>Flatpak</span><span>AppImage</span><span>Debian and Ubuntu</span><span>Fedora</span><span>Arch</span><span>x86_64 and ARM64</span>
+        </div>
+      </div>
+
+      <div class="window" aria-hidden="true">
+        <div class="bar"><div class="w"></div><div class="out"></div></div>
+        <div class="mix">
+          <div></div>
+          <div class="col"><span class="hp"></span><i></i></div>
+          <div class="col"><span class="hp off"></span><i style="width:40px"></i></div>
+
+          <div class="ch"><span class="ico c1"></span><i></i></div>
+          <div class="cell"><div class="fader"><b style="width:72%"></b><s style="left:72%"></s></div><div class="meter"><b style="width:64%"></b></div></div>
+          <div class="cell"><div class="fader"><b style="width:38%"></b><s style="left:38%"></s></div><div class="meter"><b style="width:34%"></b></div></div>
+
+          <div class="ch"><span class="ico c2"></span><i style="width:36px"></i></div>
+          <div class="cell"><div class="fader"><b style="width:55%"></b><s style="left:55%"></s></div><div class="meter"><b style="width:82%"></b></div></div>
+          <div class="cell"><div class="fader"><b style="width:66%"></b><s style="left:66%"></s></div><div class="meter"><b style="width:90%"></b></div></div>
+
+          <div class="ch"><span class="ico c3"></span><i style="width:50px"></i></div>
+          <div class="cell"><div class="fader"><b style="width:84%"></b><s style="left:84%"></s></div><div class="meter"><b style="width:46%"></b></div></div>
+          <div class="cell empty">+</div>
+
+          <div class="ch"><span class="ico c4"></span><i style="width:40px"></i></div>
+          <div class="cell muted"><div class="fader"><b style="width:60%"></b><s style="left:60%"></s></div><div class="meter"><b style="width:0"></b></div></div>
+          <div class="cell"><div class="fader"><b style="width:78%"></b><s style="left:78%"></s></div><div class="meter"><b style="width:71%"></b></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="alt">
+    <div class="wrap">
+      <div class="head">
+        <div class="kicker">Features</div>
+        <h2>One mixer for every app, every mix and every mic.</h2>
+        <p>LinuxLink builds its channels and mixes out of PipeWire, so every app and device you already use just shows up.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="7" cy="18" r="2" fill="currentColor"/></svg></div>
+          <h3>A routing matrix</h3>
+          <p>Channels are rows and mixes are columns, and every cell has its own fader, mute and level meter. The faders work like Wave Link's, with ticks every 6 dB.</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+          <h3>Apps stay in their channel</h3>
+          <p>Put any installed app in a channel, by its real name and icon, Steam and Proton games included. LinuxLink keeps it there every time it starts.</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+          <h3>Every mix is a virtual mic</h3>
+          <p>Build up to five mixes and listen to any of them. Each one is also a microphone for OBS, Discord or a recorder, so your stream hears exactly what you choose.</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l3-7 4 14 3-7h5"/></svg></div>
+          <h3>Voice ducking</h3>
+          <p>While you talk, your microphone lowers music and games in the mixes you choose. Pick the sensitivity, amount and speed, and boost quiet channels by up to 12 dB.</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><rect x="3" y="14" width="4" height="7" rx="1.5"/><rect x="17" y="14" width="4" height="7" rx="1.5"/></svg></div>
+          <h3>Devices that just work</h3>
+          <p>Microphones and inputs become channels with real gain, mute and meters. Connect a Bluetooth headset and your mixes move to it, in stereo.</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="17" cy="8" r="1.5" fill="currentColor"/></svg></div>
+          <h3>Stays out of the way</h3>
+          <p>Close the window and LinuxLink keeps running in the tray, optionally from login. It remembers everything across reboots, has a local control API for Stream Deck style controllers, and updates itself.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="wrap">
+      <div class="head">
+        <div class="kicker">Download</div>
+        <h2>Get LinuxLink</h2>
+        <p>Free, for any Linux distribution with PipeWire, on x86_64 and ARM64. Every file is also on the <a href="https://github.com/Okaza03/LinuxLink/releases/latest">release page</a>, with a <code>SHA256SUMS</code> file to check it.</p>
+      </div>
+      <div class="dl">
+        <div class="card wide">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l8-4 8 4v10l-8 4-8-4z"/><path d="M4 7l8 4 8-4M12 11v10"/></svg>Flatpak <small>any distribution</small></h3>
+          <p class="note">One command adds LinuxLink's repository for your user and installs it. The runtime comes from Flathub, and Flatpak picks the right file for your computer.</p>
+          <div class="cmd"><code>flatpak install --user @BASE@/linuxlink.flatpakref</code><button class="copy" type="button">Copy</button></div>
+          <p class="note">After that, <code>flatpak update</code> keeps it up to date, along with Discover and GNOME Software.</p>
+          <details>
+            <summary>Add the repository by hand</summary>
+            <div class="cmd"><code>flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo</code><button class="copy" type="button">Copy</button></div>
+            <div class="cmd"><code>flatpak remote-add --user --if-not-exists linuxlink @BASE@/linuxlink.flatpakrepo</code><button class="copy" type="button">Copy</button></div>
+            <div class="cmd"><code>flatpak install --user linuxlink io.github.Okaza03.LinuxLink</code><button class="copy" type="button">Copy</button></div>
+          </details>
+          <div class="files">
+            <a class="file" href="@DL@/LinuxLink-@VERSION@-x86_64.flatpak"><span><b>Flatpak bundle for x86_64</b><small>One file for <code>flatpak install --user</code>, with the same updates</small></span><span class="arrow">↓</span></a>
+            <a class="file" href="@DL@/LinuxLink-@VERSION@-aarch64.flatpak"><span><b>Flatpak bundle for ARM64</b><small>The same, for aarch64 computers</small></span><span class="arrow">↓</span></a>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M9 12l2 2 4-4"/></svg>AppImage <small>any distribution</small></h3>
+          <div class="files">
+            <a class="file" href="@DL@/LinuxLink-@VERSION@-x86_64.AppImage"><span><b>x86_64</b><small>Most PCs and laptops · updates itself</small></span><span class="arrow">↓</span></a>
+            <a class="file" href="@DL@/LinuxLink-@VERSION@-aarch64.AppImage"><span><b>ARM64</b><small>aarch64 computers · updates itself</small></span><span class="arrow">↓</span></a>
+          </div>
+          <div class="cmd"><code>chmod +x LinuxLink-*.AppImage &amp;&amp; ./LinuxLink-*.AppImage</code><button class="copy" type="button">Copy</button></div>
+        </div>
+
+        <div class="card">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9.5a3.5 3.5 0 1 0-1 5.5"/></svg>.deb <small>Debian, Ubuntu, Mint, Pop!_OS</small></h3>
+          <div class="files">
+            <a class="file" href="@DL@/linuxlink_@VERSION@_amd64.deb"><span><b>x86_64 (amd64)</b><small>Most PCs and laptops</small></span><span class="arrow">↓</span></a>
+            <a class="file" href="@DL@/linuxlink_@VERSION@_arm64.deb"><span><b>ARM64 (arm64)</b><small>aarch64 computers</small></span><span class="arrow">↓</span></a>
+          </div>
+          <div class="cmd"><code>sudo apt install ./linuxlink_*.deb</code><button class="copy" type="button">Copy</button></div>
+        </div>
+
+        <div class="card">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg>.rpm <small>Fedora, openSUSE, RHEL</small></h3>
+          <div class="files">
+            <a class="file" href="@DL@/linuxlink-@VERSION@-1.x86_64.rpm"><span><b>x86_64</b><small>Most PCs and laptops</small></span><span class="arrow">↓</span></a>
+            <a class="file" href="@DL@/linuxlink-@VERSION@-1.aarch64.rpm"><span><b>ARM64 (aarch64)</b><small>aarch64 computers</small></span><span class="arrow">↓</span></a>
+          </div>
+          <div class="cmd"><code>sudo dnf install ./linuxlink-*.rpm</code><button class="copy" type="button">Copy</button></div>
+          <p class="note">On openSUSE: <code>sudo zypper install ./linuxlink-*.rpm</code></p>
+        </div>
+
+        <div class="card">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 21c3-2 5.5-3 8-3s5 1 8 3z"/></svg>Arch <small>Arch, CachyOS, EndeavourOS, Manjaro</small></h3>
+          <div class="files">
+            <a class="file" href="@DL@/linuxlink-@VERSION@-1-x86_64.pkg.tar.zst"><span><b>x86_64</b><small>A pacman package</small></span><span class="arrow">↓</span></a>
+          </div>
+          <div class="cmd"><code>sudo pacman -U linuxlink-*.pkg.tar.zst</code><button class="copy" type="button">Copy</button></div>
+          <p class="note">Or build it yourself with the <a href="https://github.com/Okaza03/LinuxLink/blob/@TAG@/packaging/arch/PKGBUILD">PKGBUILD</a>.</p>
+        </div>
+
+        <div class="card">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>Tarball <small>anything else</small></h3>
+          <div class="files">
+            <a class="file" href="@DL@/linuxlink-@VERSION@-x86_64-linux.tar.gz"><span><b>x86_64</b><small>Installs for your user · updates itself</small></span><span class="arrow">↓</span></a>
+            <a class="file" href="@DL@/linuxlink-@VERSION@-aarch64-linux.tar.gz"><span><b>ARM64</b><small>aarch64 computers · updates itself</small></span><span class="arrow">↓</span></a>
+          </div>
+          <p class="note">Unpack it and run <code>./install.sh</code>.</p>
+        </div>
+      </div>
+      <p class="version">@VERSION_LINE@</p>
+    </div>
+  </section>
+
+  <section id="start" class="alt">
+    <div class="wrap">
+      <div class="head">
+        <div class="kicker">Get started</div>
+        <h2>From install to your first mix</h2>
+        <p>LinuxLink runs on top of the sound system most distributions already use. Three steps get you mixing.</p>
+      </div>
+      <div class="steps">
+        <div class="card">
+          <h3>Check for PipeWire</h3>
+          <p>LinuxLink needs PipeWire with pipewire-pulse, the default on Fedora, Ubuntu 22.10+, Debian 12+, Arch and most current distributions.</p>
+          <pre class="block">pactl info | grep "Server Name"
+<span style="color:var(--muted)"># Server Name: PulseAudio (on PipeWire …)</span></pre>
+          <table class="reqs">
+            <tr><td><code>pactl</code>, <code>parec</code></td><td><code>pulseaudio-utils</code>, or <code>libpulse</code> on Arch. The packages install them.</td></tr>
+            <tr><td>Tray icon</td><td>KDE, Cinnamon, XFCE; on GNOME, the AppIndicator extension</td></tr>
+          </table>
+        </div>
+        <div class="card">
+          <h3>Put your apps in channels</h3>
+          <p>Start LinuxLink from your app menu and click a channel, like <i>Music</i>. Tick or search for the apps that belong in it, and they'll land there every time they start.</p>
+        </div>
+        <div class="card">
+          <h3>Build your mixes</h3>
+          <p>In <i>My Mix</i>, set how loud each channel is in your headphones, and pick them in the top-right corner. For streaming or calls, use the <i>Stream</i> mix and select <b>LinuxLink Stream</b> as the microphone in OBS or Discord.</p>
+        </div>
+      </div>
+      <p class="note" style="margin-top:22px">The <a href="https://github.com/Okaza03/LinuxLink/blob/main/docs/user-guide.md">user guide</a> explains everything, and <a href="https://github.com/Okaza03/LinuxLink/blob/main/docs/setups.md">setups</a> has step-by-step recipes for OBS, Discord, recording and Bluetooth headsets.</p>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="wrap">
+      <img src="linuxlink.svg" alt="">
+      <h2>Your audio, mixed your way.</h2>
+      <p>Free and open source, under the MIT or Apache 2.0 license.</p>
+      <div class="actions">
+        <a class="btn primary" href="#download">Download LinuxLink</a>
+        <a class="btn ghost" href="https://github.com/Okaza03/LinuxLink/issues">Report a problem</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="grow">LinuxLink · MIT OR Apache-2.0<small>An independent project, not affiliated with or endorsed by Elgato or Corsair.</small></span>
+    <a href="https://github.com/Okaza03/LinuxLink">GitHub</a>
+    <a href="https://github.com/Okaza03/LinuxLink/releases">Releases</a>
+    <a href="https://github.com/Okaza03/LinuxLink/blob/main/docs/user-guide.md">User guide</a>
+    <a href="https://github.com/Okaza03/LinuxLink/issues">Issues</a>
+  </div>
+</footer>
+
+<script>
+  // Copy buttons next to the commands
+  for (const b of document.querySelectorAll(".copy")) {
+    b.addEventListener("click", async () => {
+      const text = b.parentElement.querySelector("code").textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        b.textContent = "Copied";
+      } catch {
+        b.textContent = "Select and copy";
+      }
+      setTimeout(() => (b.textContent = "Copy"), 1800);
+    });
+  }
+</script>
+</body>
+</html>
