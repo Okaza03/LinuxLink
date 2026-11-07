@@ -68,6 +68,12 @@
   </supports>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.4.0" date="2026-11-07">
+      <url type="details">https://github.com/Okaza03/LinuxLink/releases/tag/v0.4.0</url>
+      <description>
+        <p>LinuxLink has a website and its own signed Flatpak repository, so flatpak update keeps it up to date on x86_64 and ARM64.</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-10-21">
       <url type="details">https://github.com/Okaza03/LinuxLink/releases/tag/v0.3.1</url>
       <description>

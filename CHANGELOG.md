@@ -9,6 +9,10 @@ update, and as the notes of the matching GitHub release.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-07
+
+LinuxLink has a website, and its own Flatpak repository for `flatpak update`.
+
 ### Added
 
 - **A website and a Flatpak repository** at
@@ -266,7 +270,9 @@ built on PipeWire.
   Flatpak, .deb (Debian, Ubuntu, Mint, Pop!_OS), .rpm (Fedora, openSUSE), an
   Arch Linux package, and a plain tarball.
 
-[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Okaza03/LinuxLink/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Okaza03/LinuxLink/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/Okaza03/LinuxLink/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Okaza03/LinuxLink/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Okaza03/LinuxLink/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/Okaza03/LinuxLink/compare/v0.1.2...v0.1.3
